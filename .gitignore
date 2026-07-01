@@ -1,0 +1,5 @@
+node_modules/
+local.db
+*.db
+.env
+test/e2e-test.db

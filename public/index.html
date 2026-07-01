@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Traditional Mahjong</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0f3d2e;
+    --bg-light: #17573f;
+    --accent: #d4af37;
+    --text: #f4ead1;
+    --danger: #c0392b;
+    --tile-bg: #fdf6e3;
+    --tile-text: #1a1a1a;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  .screen { display: none; padding: clamp(12px, 4vw, 32px); min-height: 100vh; }
+  .screen.active { display: flex; flex-direction: column; }
+  h1 { font-size: clamp(1.4rem, 5vw, 2.2rem); margin: 0 0 1rem; color: var(--accent); }
+  h2 { font-size: clamp(1.1rem, 4vw, 1.6rem); margin: 0 0 0.75rem; }
+  input, button {
+    font-size: clamp(0.95rem, 3vw, 1.05rem);
+    padding: 0.7em 1em;
+    border-radius: var(--radius);
+    border: none;
+    margin-bottom: 0.6em;
+    width: 100%;
+  }
+  input { background: var(--bg-light); color: var(--text); border: 1px solid #2d7a56; }
+  button {
+    background: var(--accent);
+    color: #1a1a1a;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.1s ease;
+  }
+  button:active { transform: scale(0.97); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button.secondary { background: var(--bg-light); color: var(--text); border: 1px solid var(--accent); }
+  .card { background: var(--bg-light); border-radius: var(--radius); padding: 1rem; margin-bottom: 1rem; }
+  .error { color: #ff8a80; font-size: 0.9rem; min-height: 1.2em; }
+  .link-btn { background: none; color: var(--accent); text-decoration: underline; width: auto; padding: 0.4em; }
+
+  .players-row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+  .player-chip { background: var(--bg-light); padding: 0.5em 0.9em; border-radius: 20px; font-size: 0.85rem; }
+  .player-chip.turn { background: var(--accent); color: #1a1a1a; font-weight: 700; }
+
+  .discard-area { text-align: center; padding: 1rem; margin-bottom: 1rem; }
+  .discard-tile { display: inline-block; }
+
+  .hand-row { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; margin: 0.5rem 0; }
+  .tile {
+    background: var(--tile-bg);
+    border-radius: 6px;
+    width: clamp(34px, 9vw, 52px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3), inset 0 -2px 0 rgba(0,0,0,0.08);
+    user-select: none;
+    -webkit-user-select: none;
+    overflow: hidden;
+    line-height: 0;
+  }
+  .tile svg { display: block; width: 100%; height: auto; }
+  .tile.selectable { cursor: pointer; }
+  .tile.selected { outline: 3px solid var(--danger); transform: translateY(-6px); }
+
+  .exposed-sets { display: flex; gap: 8px; flex-wrap: wrap; margin: 0.4rem 0; }
+  .exposed-set { display: flex; gap: 2px; background: rgba(0,0,0,0.2); padding: 4px; border-radius: 6px; }
+
+  /* ---------- Bamboo table + tile rack (game screen) ---------- */
+  #game.screen.active {
+    background-color: #c9a24b;
+    background-image:
+      repeating-linear-gradient(45deg, rgba(255,255,255,0.10) 0px, rgba(255,255,255,0.10) 2px, transparent 2px, transparent 11px),
+      repeating-linear-gradient(-45deg, rgba(0,0,0,0.12) 0px, rgba(0,0,0,0.12) 2px, transparent 2px, transparent 11px),
+      linear-gradient(180deg, #dcb765, #ad8236);
+    background-attachment: fixed;
+  }
+  #game .card {
+    background: rgba(15, 25, 20, 0.6);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+  }
+  #roundBanner { font-weight: 600; letter-spacing: 0.02em; }
+
+  .rack {
+    position: relative;
+    background: linear-gradient(180deg, #9c6a34 0%, #7a4f24 85%, #5e3c1a 100%);
+    border-radius: 8px;
+    padding: 14px 10px 18px;
+    box-shadow: 0 6px 14px rgba(0,0,0,0.45), inset 0 2px 0 rgba(255,255,255,0.18);
+  }
+  .rack::after {
+    content: '';
+    position: absolute;
+    left: 10px; right: 10px; bottom: 8px; height: 5px;
+    background: rgba(0,0,0,0.3);
+    border-radius: 3px;
+  }
+  .rack .hand-row { margin: 0; position: relative; z-index: 1; }
+  .hand-hint { font-size: 0.75em; font-weight: 400; opacity: 0.75; }
+
+  /* ---------- Animations ---------- */
+  @keyframes tileDeal {
+    from { opacity: 0; transform: translateY(-130px) rotate(-10deg) scale(0.7); }
+    to   { opacity: 1; transform: translateY(0) rotate(0) scale(1); }
+  }
+  .tile.tile-deal {
+    animation: tileDeal 420ms cubic-bezier(.2,.8,.2,1) both;
+    animation-delay: calc(var(--deal-i, 0) * 55ms);
+  }
+
+  @keyframes tileToss {
+    0%   { opacity: 0; transform: scale(0.4) rotate(-18deg); }
+    65%  { opacity: 1; transform: scale(1.08) rotate(4deg); }
+    100% { opacity: 1; transform: scale(1) rotate(0); }
+  }
+  .tile.tile-toss { animation: tileToss 260ms ease-out; }
+
+  .tile { transition: transform 150ms ease, box-shadow 150ms ease; touch-action: none; }
+  .tile.dragging { transition: none; z-index: 50; box-shadow: 0 10px 18px rgba(0,0,0,0.5); cursor: grabbing; }
+  .tile.selectable { cursor: grab; }
+
+  .action-bar { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 1rem; }
+  .action-bar button { width: auto; flex: 1; min-width: 100px; }
+
+  .modal-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.6);
+    align-items: center; justify-content: center;
+    z-index: 100;
+  }
+  .modal-overlay.active { display: flex; }
+  .modal {
+    background: var(--bg-light);
+    border-radius: var(--radius);
+    padding: 1.5rem;
+    max-width: 90vw;
+    width: 360px;
+  }
+
+  #toggleContainer { display: flex; align-items: center; gap: 0.5em; margin-top: 1rem; }
+  #toggleContainer input { width: auto; }
+</style>
+</head>
+<body>
+
+<!-- AUTH SCREEN -->
+<div id="auth" class="screen active">
+  <h1>🀄 Traditional Mahjong</h1>
+  <div class="card">
+    <div id="authTabs" style="display:flex; gap:0.5rem; margin-bottom:1rem;">
+      <button id="tabLogin" class="secondary" style="flex:1">Log In</button>
+      <button id="tabRegister" class="secondary" style="flex:1">Register</button>
+    </div>
+
+    <div id="loginForm">
+      <input id="loginEmail" type="email" placeholder="Email" autocomplete="email">
+      <input id="loginPassword" type="password" placeholder="Password" autocomplete="current-password">
+      <button id="loginBtn">Log In</button>
+      <button class="link-btn" id="forgotBtn">Forgot password?</button>
+    </div>
+
+    <div id="registerForm" style="display:none;">
+      <input id="regName" type="text" placeholder="Display name">
+      <input id="regEmail" type="email" placeholder="Email" autocomplete="email">
+      <input id="regPassword" type="password" placeholder="Password (min 6 chars)" autocomplete="new-password">
+      <button id="registerBtn">Create Account</button>
+    </div>
+
+    <div id="authError" class="error"></div>
+  </div>
+</div>
+
+<!-- PASSWORD RESET MODAL -->
+<div class="modal-overlay" id="resetOverlay">
+  <div class="modal" onclick="event.stopPropagation()">
+    <h2 id="resetStepTitle">Reset Password</h2>
+    <div id="resetStep1">
+      <input id="resetEmail" type="email" placeholder="Your email">
+      <button id="resetSendOtp">Send Code</button>
+    </div>
+    <div id="resetStep2" style="display:none;">
+      <input id="resetOtp" type="text" placeholder="6-digit code" maxlength="6">
+      <button id="resetVerifyOtp">Verify Code</button>
+    </div>
+    <div id="resetStep3" style="display:none;">
+      <input id="resetNewPassword" type="password" placeholder="New password (min 6 chars)">
+      <button id="resetComplete">Set New Password</button>
+    </div>
+    <div id="resetError" class="error"></div>
+    <button class="secondary" id="resetCancel">Cancel</button>
+  </div>
+</div>
+
+<!-- DASHBOARD SCREEN -->
+<div id="dashboard" class="screen">
+  <h1>🀄 Mahjong Dashboard</h1>
+  <div class="card">
+    <h2>Welcome, <span id="dashName"></span></h2>
+    <button id="createRoomBtn">Create New Room</button>
+    <input id="joinRoomCode" type="text" placeholder="Room code" style="text-transform:uppercase;">
+    <button id="joinRoomBtn" class="secondary">Join Room</button>
+  </div>
+  <div class="card">
+    <div id="toggleContainer">
+      <input type="checkbox" id="pushToggle">
+      <label for="pushToggle">Enable push notifications</label>
+    </div>
+  </div>
+  <button class="secondary" id="logoutBtn">Log Out</button>
+</div>
+
+<!-- WAITING ROOM SCREEN -->
+<div id="waiting" class="screen">
+  <h1>Waiting for Players</h1>
+  <div class="card">
+    <p>Room code: <strong id="waitingRoomCode"></strong></p>
+    <div class="players-row" id="waitingPlayers"></div>
+    <p id="waitingStatus">Waiting for 4 players to join…</p>
+  </div>
+  <button class="secondary" id="leaveWaitingBtn">Leave Room</button>
+</div>
+
+<!-- GAME SCREEN -->
+<div id="game" class="screen">
+  <div class="card" id="roundBanner" style="text-align:center; padding:0.5rem;"></div>
+  <div class="players-row" id="gamePlayers"></div>
+
+  <div class="discard-area card">
+    <div id="currentDiscardLabel">No discard yet</div>
+    <div class="discard-tile" id="currentDiscardTile"></div>
+  </div>
+
+  <div class="card">
+    <h2>Exposed Sets</h2>
+    <div id="allExposedSets"></div>
+  </div>
+
+  <div class="card">
+    <h2>Your Hand <span class="hand-hint">(drag tiles to rearrange)</span></h2>
+    <div class="rack">
+      <div class="hand-row" id="handRow"></div>
+    </div>
+  </div>
+
+  <div class="action-bar" id="actionBar"></div>
+</div>
+
+<script>
+  const state = {
+    playerId: localStorage.getItem('mj_playerId') || crypto.randomUUID(),
+    user: null,
+    ws: null,
+    roomCode: null,
+    mySeat: null,
+    roomState: null,
+    selectedTile: null,
+    handOrder: [],        // client-side tile order for drag-to-rearrange, reconciled against server hand
+    dealtHandKey: null,   // identifies the current hand, used to trigger the deal-in animation once per hand
+    lastDiscardKey: null, // identifies the current discard, used to trigger the toss-in animation once per discard
+  };
+  localStorage.setItem('mj_playerId', state.playerId);
+
+  function showScreen(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+  }
+
+  function setButtonsEnabled(enabled) {
+    document.querySelectorAll('button').forEach(b => b.disabled = !enabled);
+  }
+
+  // ---------- Auth ----------
+  document.getElementById('tabLogin').addEventListener('click', () => {
+    document.getElementById('loginForm').style.display = 'block';
+    document.getElementById('registerForm').style.display = 'none';
+  });
+  document.getElementById('tabRegister').addEventListener('click', () => {
+    document.getElementById('loginForm').style.display = 'none';
+    document.getElementById('registerForm').style.display = 'block';
+  });
+
+  async function apiCall(url, options = {}) {
+    const res = await fetch(url, {
+      ...options,
+      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+      credentials: 'include',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Request failed');
+    return data;
+  }
+
+  document.getElementById('loginBtn').addEventListener('click', async () => {
+    setButtonsEnabled(false);
+    const errEl = document.getElementById('authError');
+    errEl.textContent = '';
+    try {
+      const email = document.getElementById('loginEmail').value.trim();
+      const password = document.getElementById('loginPassword').value;
+      const user = await apiCall('/api/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+      state.user = user;
+      enterDashboard();
+    } catch (err) {
+      errEl.textContent = err.message;
+    } finally {
+      setButtonsEnabled(true);
+    }
+  });
+
+  document.getElementById('registerBtn').addEventListener('click', async () => {
+    setButtonsEnabled(false);
+    const errEl = document.getElementById('authError');
+    errEl.textContent = '';
+    try {
+      const name = document.getElementById('regName').value.trim();
+      const email = document.getElementById('regEmail').value.trim();
+      const password = document.getElementById('regPassword').value;
+      const user = await apiCall('/api/register', { method: 'POST', body: JSON.stringify({ name, email, password }) });
+      state.user = user;
+      enterDashboard();
+    } catch (err) {
+      errEl.textContent = err.message;
+    } finally {
+      setButtonsEnabled(true);
+    }
+  });
+
+  document.getElementById('logoutBtn').addEventListener('click', async () => {
+    await apiCall('/api/logout', { method: 'POST' });
+    state.user = null;
+    if (state.ws) state.ws.close();
+    showScreen('auth');
+    setButtonsEnabled(true);
+  });
+
+  // Password reset flow (3-step)
+  const resetOverlay = document.getElementById('resetOverlay');
+  document.getElementById('forgotBtn').addEventListener('click', () => {
+    resetOverlay.classList.add('active');
+    document.getElementById('resetStep1').style.display = 'block';
+    document.getElementById('resetStep2').style.display = 'none';
+    document.getElementById('resetStep3').style.display = 'none';
+    document.getElementById('resetError').textContent = '';
+  });
+  document.getElementById('resetCancel').addEventListener('click', () => resetOverlay.classList.remove('active'));
+  resetOverlay.addEventListener('click', () => resetOverlay.classList.remove('active'));
+
+  let resetEmailValue = '';
+  document.getElementById('resetSendOtp').addEventListener('click', async () => {
+    const errEl = document.getElementById('resetError');
+    try {
+      resetEmailValue = document.getElementById('resetEmail').value.trim();
+      await apiCall('/api/password-reset/request', { method: 'POST', body: JSON.stringify({ email: resetEmailValue }) });
+      document.getElementById('resetStep1').style.display = 'none';
+      document.getElementById('resetStep2').style.display = 'block';
+      errEl.textContent = '';
+    } catch (err) { errEl.textContent = err.message; }
+  });
+  document.getElementById('resetVerifyOtp').addEventListener('click', async () => {
+    const errEl = document.getElementById('resetError');
+    try {
+      const otp = document.getElementById('resetOtp').value.trim();
+      await apiCall('/api/password-reset/verify', { method: 'POST', body: JSON.stringify({ email: resetEmailValue, otp }) });
+      document.getElementById('resetStep2').style.display = 'none';
+      document.getElementById('resetStep3').style.display = 'block';
+      errEl.textContent = '';
+    } catch (err) { errEl.textContent = err.message; }
+  });
+  document.getElementById('resetComplete').addEventListener('click', async () => {
+    const errEl = document.getElementById('resetError');
+    try {
+      const otp = document.getElementById('resetOtp').value.trim();
+      const newPassword = document.getElementById('resetNewPassword').value;
+      await apiCall('/api/password-reset/complete', { method: 'POST', body: JSON.stringify({ email: resetEmailValue, otp, newPassword }) });
+      resetOverlay.classList.remove('active');
+    } catch (err) { errEl.textContent = err.message; }
+  });
+
+  async function enterDashboard() {
+    document.getElementById('dashName').textContent = state.user.name;
+    showScreen('dashboard');
+    setButtonsEnabled(true);
+    initPushToggle();
+  }
+
+  // ---------- Push notifications ----------
+  async function initPushToggle() {
+    const toggle = document.getElementById('pushToggle');
+    try {
+      const { enabled } = await apiCall('/api/push/enabled');
+      if (!enabled || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+        toggle.disabled = true;
+        return;
+      }
+      const { subscribed } = await apiCall('/api/push/status');
+      toggle.checked = subscribed;
+      toggle.addEventListener('change', async () => {
+        if (toggle.checked) await subscribePush();
+        else await unsubscribePush();
+      });
+    } catch {
+      toggle.disabled = true;
+    }
+  }
+
+  async function subscribePush() {
+    try {
+      const reg = await navigator.serviceWorker.register('/sw.js');
+      const { key } = await apiCall('/api/push/vapid-key');
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(key),
+      });
+      await apiCall('/api/push/subscribe', { method: 'POST', body: JSON.stringify(sub) });
+    } catch (err) {
+      console.error('Push subscribe failed:', err);
+    }
+  }
+
+  async function unsubscribePush() {
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = await reg?.pushManager.getSubscription();
+      if (sub) {
+        await apiCall('/api/push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint: sub.endpoint }) });
+        await sub.unsubscribe();
+      }
+    } catch (err) {
+      console.error('Push unsubscribe failed:', err);
+    }
+  }
+
+  function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(base64);
+    return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+  }
+
+  // ---------- WebSocket ----------
+  function connectWS() {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    state.ws = new WebSocket(`${proto}://${location.host}`);
+    state.ws.addEventListener('message', (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+        handleWSMessage(msg);
+      } catch (err) {
+        console.error('Bad WS message:', err);
+      }
+    });
+    state.ws.addEventListener('close', () => {
+      console.log('WS disconnected');
+    });
+  }
+
+  function wsSend(msg) {
+    if (state.ws && state.ws.readyState === WebSocket.OPEN) state.ws.send(JSON.stringify(msg));
+  }
+
+  function handleWSMessage(msg) {
+    switch (msg.type) {
+      case 'room_created':
+        state.roomCode = msg.roomCode;
+        enterWaitingRoom();
+        break;
+      case 'room_joined':
+        state.roomCode = msg.roomCode;
+        state.mySeat = msg.seat;
+        enterWaitingRoom();
+        break;
+      case 'room_state':
+        state.roomState = msg.room;
+        const me = msg.room.players.find(p => p.playerId === state.playerId);
+        if (me) state.mySeat = me.seat;
+        if (msg.room.phase === 'waiting') renderWaiting();
+        else renderGame();
+        break;
+      case 'game_started':
+        showScreen('game');
+        break;
+      case 'game_won':
+        onGameWon(msg);
+        break;
+      case 'wall_empty':
+        setButtonsEnabled(true);
+        alert(msg.matchOver ? 'Wall exhausted — draw. Match complete.' : 'Wall exhausted — hand is a draw.');
+        break;
+      case 'error':
+        alert(msg.message);
+        setButtonsEnabled(true);
+        goToDashboardFallback();
+        break;
+    }
+  }
+
+  function goToDashboardFallback() {
+    // safety net: never leave the user stuck with disabled buttons
+    setButtonsEnabled(true);
+  }
+
+  // ---------- Dashboard actions ----------
+  document.getElementById('createRoomBtn').addEventListener('click', () => {
+    if (!state.ws) connectWS();
+    setTimeout(() => wsSend({ type: 'create_room', playerId: state.playerId, userId: state.user.id, displayName: state.user.name }), 150);
+  });
+
+  document.getElementById('joinRoomBtn').addEventListener('click', () => {
+    const code = document.getElementById('joinRoomCode').value.trim().toUpperCase();
+    if (!code) return;
+    if (!state.ws) connectWS();
+    setTimeout(() => wsSend({ type: 'join_room', roomCode: code, playerId: state.playerId, userId: state.user.id, displayName: state.user.name }), 150);
+  });
+
+  document.getElementById('leaveWaitingBtn').addEventListener('click', () => {
+    returnToDashboard();
+  });
+
+  function returnToDashboard() {
+    setButtonsEnabled(true);
+    document.querySelectorAll('.modal-overlay').forEach(m => m.classList.remove('active'));
+    state.roomCode = null;
+    state.mySeat = null;
+    state.roomState = null;
+    showScreen('dashboard');
+  }
+
+  function enterWaitingRoom() {
+    document.getElementById('waitingRoomCode').textContent = state.roomCode;
+    showScreen('waiting');
+  }
+
+  function renderWaiting() {
+    const container = document.getElementById('waitingPlayers');
+    container.innerHTML = '';
+    for (const p of state.roomState.players) {
+      const chip = document.createElement('div');
+      chip.className = 'player-chip';
+      chip.textContent = `${p.displayName} (${p.seat})`;
+      container.appendChild(chip);
+    }
+    document.getElementById('waitingStatus').textContent =
+      `${state.roomState.players.length}/4 players joined…`;
+  }
+
+  // ---------- Game rendering ----------
+  function renderGame() {
+    showScreen('game');
+    const room = state.roomState;
+
+    // round/dealer banner
+    const roundNames = { EW: 'East', SW: 'South', WW: 'West', NW: 'North' };
+    const banner = document.getElementById('roundBanner');
+    const dealer = room.players.find(p => p.seat === room.round?.dealerSeat);
+    banner.textContent = `${roundNames[room.roundWind] || room.roundWind} Round · Hand ${room.round?.handNumber ?? 1} · Dealer: ${dealer?.displayName ?? room.round?.dealerSeat ?? '?'}`;
+
+    // players row
+    const playersRow = document.getElementById('gamePlayers');
+    playersRow.innerHTML = '';
+    for (const p of room.players) {
+      const chip = document.createElement('div');
+      chip.className = 'player-chip' + (p.seat === room.turnSeat ? ' turn' : '');
+      const windLabel = { EW: 'E', SW: 'S', WW: 'W', NW: 'N' }[p.seatWind] || '';
+      chip.textContent = `${p.displayName} (${windLabel}) · ${p.handCount} tiles · ${p.score ?? 0}pts`;
+      playersRow.appendChild(chip);
+    }
+
+    // discard
+    const discardTileEl = document.getElementById('currentDiscardTile');
+    const discardLabel = document.getElementById('currentDiscardLabel');
+    discardTileEl.innerHTML = '';
+    if (room.currentDiscard) {
+      discardLabel.textContent = `Discarded by ${room.currentDiscard.fromSeat}`;
+      const discardKey = `${room.currentDiscard.tile}_${room.currentDiscard.fromSeat}`;
+      const tileEl = makeTileEl(room.currentDiscard.tile);
+      if (discardKey !== state.lastDiscardKey) {
+        tileEl.classList.add('tile-toss');
+        state.lastDiscardKey = discardKey;
+      }
+      discardTileEl.appendChild(tileEl);
+    } else {
+      discardLabel.textContent = 'No discard yet';
+      state.lastDiscardKey = null;
+    }
+
+    // exposed sets for all players
+    const exposedContainer = document.getElementById('allExposedSets');
+    exposedContainer.innerHTML = '';
+    for (const p of room.players) {
+      if (!p.exposed || p.exposed.length === 0) continue;
+      const row = document.createElement('div');
+      row.innerHTML = `<strong>${p.seat}</strong>`;
+      const setsRow = document.createElement('div');
+      setsRow.className = 'exposed-sets';
+      for (const set of p.exposed) {
+        const setEl = document.createElement('div');
+        setEl.className = 'exposed-set';
+        set.tiles.forEach(t => setEl.appendChild(makeTileEl(t)));
+        setsRow.appendChild(setEl);
+      }
+      row.appendChild(setsRow);
+      exposedContainer.appendChild(row);
+    }
+
+    // my hand — reconcile local drag order against the authoritative server hand,
+    // and detect whether this is the first render of a freshly dealt hand
+    const me = room.players.find(p => p.playerId === state.playerId);
+    const isMyTurn = room.turnSeat === state.mySeat;
+    const dealKey = room.round ? `${room.round.windIndex}-${room.round.handNumber}-${room.round.dealerSeat}` : null;
+    const isNewDeal = dealKey !== null && dealKey !== state.dealtHandKey;
+    if (isNewDeal) {
+      state.handOrder = [];
+      state.dealtHandKey = dealKey;
+    }
+    if (me && me.hand) reconcileHandOrder(me.hand);
+    renderHand(isNewDeal);
+
+    renderActionBar(room, me, isMyTurn);
+  }
+
+  // Keeps the player's chosen tile order stable across server updates: tiles still
+  // present keep their position, tiles no longer present (discarded/claimed) drop out,
+  // and newly drawn tiles are appended at the end.
+  function reconcileHandOrder(serverHand) {
+    const remaining = {};
+    for (const t of serverHand) remaining[t] = (remaining[t] || 0) + 1;
+    const kept = [];
+    for (const t of state.handOrder) {
+      if (remaining[t] > 0) { kept.push(t); remaining[t]--; }
+    }
+    for (const t of serverHand) {
+      if (remaining[t] > 0) { kept.push(t); remaining[t]--; }
+    }
+    state.handOrder = kept;
+  }
+
+  function renderHand(isNewDeal) {
+    const handRow = document.getElementById('handRow');
+    handRow.innerHTML = '';
+    state.handOrder.forEach((tile, index) => {
+      const el = makeTileEl(tile);
+      el.classList.add('selectable');
+      if (state.selectedTile === tile) el.classList.add('selected');
+      if (isNewDeal) {
+        el.classList.add('tile-deal');
+        el.style.setProperty('--deal-i', index);
+      }
+      el.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
+      attachTileDrag(el, index);
+      handRow.appendChild(el);
+    });
+  }
+
+  // ---------- Drag-to-rearrange ----------
+  // Pure helpers (no DOM) so the reorder math can be reasoned about/tested independently.
+  function computeDropIndex(siblingCenters, pointerX) {
+    let idx = 0;
+    for (const cx of siblingCenters) {
+      if (pointerX > cx) idx++;
+    }
+    return idx;
+  }
+
+  function moveItem(arr, fromIndex, toIndex) {
+    const copy = arr.slice();
+    const [item] = copy.splice(fromIndex, 1);
+    const clamped = Math.max(0, Math.min(toIndex, copy.length));
+    copy.splice(clamped, 0, item);
+    return copy;
+  }
+
+  function attachTileDrag(el, index) {
+    let dragging = false;
+    let pointerId = null;
+    let startX = 0, startY = 0;
+
+    function onPointerMove(e) {
+      if (e.pointerId !== pointerId) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      if (!dragging && (Math.abs(dx) > 6 || Math.abs(dy) > 6)) {
+        dragging = true;
+        el._wasDragged = true;
+        el.classList.add('dragging');
+      }
+      if (!dragging) return;
+      e.preventDefault();
+      el.style.transform = `translate(${dx}px, ${Math.min(dy, 0) - 14}px) scale(1.08)`;
+    }
+
+    function onPointerUp(e) {
+      if (e.pointerId !== pointerId) return;
+      el.removeEventListener('pointermove', onPointerMove);
+      el.removeEventListener('pointerup', onPointerUp);
+      el.removeEventListener('pointercancel', onPointerUp);
+      el.classList.remove('dragging');
+      el.style.transform = '';
+      if (dragging) {
+        const handRow = document.getElementById('handRow');
+        const centers = [...handRow.children]
+          .filter((child, i) => i !== index)
+          .map(child => {
+            const rect = child.getBoundingClientRect();
+            return rect.left + rect.width / 2;
+          });
+        const dropIndex = computeDropIndex(centers, e.clientX);
+        state.handOrder = moveItem(state.handOrder, index, dropIndex);
+        renderHand(false);
+      } else {
+        selectTile(state.handOrder[index]);
+      }
+      setTimeout(() => { el._wasDragged = false; }, 50);
+      dragging = false;
+      pointerId = null;
+    }
+
+    el.addEventListener('pointerdown', (e) => {
+      pointerId = e.pointerId;
+      startX = e.clientX; startY = e.clientY;
+      dragging = false;
+      try { el.setPointerCapture(pointerId); } catch { /* ignore unsupported browsers */ }
+      el.addEventListener('pointermove', onPointerMove);
+      el.addEventListener('pointerup', onPointerUp);
+      el.addEventListener('pointercancel', onPointerUp);
+    });
+  }
+
+  function selectTile(tile) {
+    state.selectedTile = state.selectedTile === tile ? null : tile;
+    renderGame();
+  }
+
+  // ---------- Tile graphics ----------
+  // SVG tile faces styled after the physical set: red numerals + black 萬 for
+  // Characters, green bamboo-stick icons (with the traditional red middle stick
+  // on the 5), colored dot/medallion patterns for Circles, red East/West +
+  // black North/South winds, and 中/發 dragons with a bordered blank for White Dragon.
+  const INK = '#1a1a1a';
+  const RED = '#c0392b';
+  const GREEN = '#1b5e3a';
+  const NAVY = '#1b3a63';
+  const CJK_FONT = "'Noto Serif SC', serif";
+
+  function svgWrap(inner) {
+    return `<svg viewBox="0 0 100 140" xmlns="http://www.w3.org/2000/svg">${inner}</svg>`;
+  }
+
+  function glyph(ch, color, size = 70, y = 90) {
+    return `<text x="50" y="${y}" text-anchor="middle" font-family="${CJK_FONT}" font-weight="900" font-size="${size}" fill="${color}">${ch}</text>`;
+  }
+
+  // Distributes n items into a centered grid (up to `maxCols` per row) for bamboo/dot pips
+  function gridPositions(n, maxCols = 3, xRange = [22, 78], yRange = [30, 112]) {
+    const cols = Math.min(maxCols, n);
+    const rows = Math.ceil(n / cols);
+    const positions = [];
+    const colGap = cols > 1 ? (xRange[1] - xRange[0]) / (cols - 1) : 0;
+    const rowGap = rows > 1 ? (yRange[1] - yRange[0]) / (rows - 1) : 0;
+    for (let r = 0; r < rows; r++) {
+      const itemsInRow = Math.min(cols, n - r * cols);
+      const rowWidth = (itemsInRow - 1) * colGap;
+      const startX = (xRange[0] + xRange[1]) / 2 - rowWidth / 2;
+      const y = rows === 1 ? (yRange[0] + yRange[1]) / 2 : yRange[0] + r * rowGap;
+      for (let c = 0; c < itemsInRow; c++) {
+        positions.push([itemsInRow === 1 ? (xRange[0] + xRange[1]) / 2 : startX + c * colGap, y]);
+      }
+    }
+    return positions;
+  }
+
+  function characterSVG(n) {
+    const numerals = ['一','二','三','四','五','六','七','八','九'];
+    return svgWrap(glyph(numerals[n - 1], RED, 26, 34) + glyph('萬', INK, 64, 116));
+  }
+
+  function bambooStick(cx, cy, color) {
+    const w = 11, h = 34;
+    return `<g>
+      <rect x="${cx - w / 2}" y="${cy - h / 2}" width="${w}" height="${h}" rx="${w / 2}" fill="${color}"/>
+      <line x1="${cx - w / 2 + 1.5}" y1="${cy - h / 6}" x2="${cx + w / 2 - 1.5}" y2="${cy - h / 6}" stroke="#fdf6e3" stroke-width="1.2"/>
+      <line x1="${cx - w / 2 + 1.5}" y1="${cy + h / 6}" x2="${cx + w / 2 - 1.5}" y2="${cy + h / 6}" stroke="#fdf6e3" stroke-width="1.2"/>
+    </g>`;
+  }
+
+  function birdSVG() {
+    return svgWrap(`
+      <g fill="none" stroke="${GREEN}" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M18 68 Q35 40 50 58 Q65 40 82 68"/>
+        <path d="M28 92 Q42 72 50 84 Q58 72 72 92"/>
+        <path d="M50 58 L50 84"/>
+      </g>
+      <circle cx="50" cy="58" r="5" fill="${RED}"/>
+    `);
+  }
+
+  function bambooSVG(n) {
+    if (n === 1) return birdSVG();
+    const positions = gridPositions(n, 3);
+    const midIdx = Math.floor(positions.length / 2);
+    const sticks = positions.map((p, i) => bambooStick(p[0], p[1], (n === 5 && i === midIdx) ? RED : GREEN)).join('');
+    return svgWrap(sticks);
+  }
+
+  function dotMedallion() {
+    const rings = `
+      <circle cx="50" cy="70" r="34" fill="none" stroke="${GREEN}" stroke-width="3"/>
+      <circle cx="50" cy="70" r="23" fill="none" stroke="${RED}" stroke-width="2.5"/>
+      <circle cx="50" cy="70" r="9" fill="${RED}"/>`;
+    const spokes = Array.from({ length: 8 }).map((_, i) => {
+      const a = (i * Math.PI) / 4;
+      const x1 = 50 + 17 * Math.cos(a), y1 = 70 + 17 * Math.sin(a);
+      const x2 = 50 + 29 * Math.cos(a), y2 = 70 + 29 * Math.sin(a);
+      return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${GREEN}" stroke-width="2"/>`;
+    }).join('');
+    return svgWrap(rings + spokes);
+  }
+
+  function dotSVG(n) {
+    if (n === 1) return dotMedallion();
+    const palette = [GREEN, RED, NAVY];
+    const positions = gridPositions(n, 3);
+    const circles = positions.map((p, i) => `<circle cx="${p[0]}" cy="${p[1]}" r="9" fill="${palette[i % palette.length]}"/>`).join('');
+    return svgWrap(circles);
+  }
+
+  const WIND_GLYPHS = { EW: ['東', RED], SW: ['南', INK], WW: ['西', RED], NW: ['北', INK] };
+  function windSVG(tile) {
+    const [ch, color] = WIND_GLYPHS[tile];
+    return svgWrap(glyph(ch, color, 68, 92));
+  }
+
+  function dragonSVG(tile) {
+    if (tile === 'RD') return svgWrap(glyph('中', RED, 68, 92));
+    if (tile === 'GD') return svgWrap(glyph('發', GREEN, 60, 92));
+    // White Dragon: blank tile with a bordered frame
+    return svgWrap(`
+      <rect x="14" y="14" width="72" height="112" rx="6" fill="none" stroke="${NAVY}" stroke-width="3"/>
+      <rect x="20" y="20" width="60" height="100" rx="4" fill="none" stroke="${NAVY}" stroke-width="1.5"/>
+    `);
+  }
+
+  const BONUS_PALETTE = [RED, GREEN, NAVY, '#8e44ad'];
+  function flowerSVG(tile) {
+    const idx = parseInt(tile[1], 10);
+    const color = BONUS_PALETTE[(idx - 1) % BONUS_PALETTE.length];
+    const petals = Array.from({ length: 5 }).map((_, i) => {
+      const a = i * (2 * Math.PI / 5) - Math.PI / 2;
+      const cx = 50 + 19 * Math.cos(a), cy = 52 + 19 * Math.sin(a);
+      return `<circle cx="${cx}" cy="${cy}" r="11" fill="${color}" opacity="0.85"/>`;
+    }).join('');
+    return svgWrap(`${petals}<circle cx="50" cy="52" r="8" fill="#fdf6e3" stroke="${color}" stroke-width="2"/>` + glyph(String(idx), color, 28, 112));
+  }
+
+  function seasonSVG(tile) {
+    const idx = parseInt(tile[1], 10);
+    const color = BONUS_PALETTE[(idx - 1) % BONUS_PALETTE.length];
+    return svgWrap(`
+      <path d="M50 26 L67 52 L50 78 L33 52 Z" fill="none" stroke="${color}" stroke-width="3"/>
+      <path d="M50 40 L59 52 L50 64 L41 52 Z" fill="${color}" opacity="0.75"/>
+    ` + glyph(String(idx), color, 28, 112));
+  }
+
+  function tileSVG(tile) {
+    if (WIND_GLYPHS[tile]) return windSVG(tile);
+    if (tile === 'RD' || tile === 'GD' || tile === 'WD') return dragonSVG(tile);
+    if (tile.startsWith('F')) return flowerSVG(tile);
+    if (tile.startsWith('S')) return seasonSVG(tile);
+    const n = parseInt(tile.slice(0, -1), 10);
+    const suit = tile.slice(-1);
+    if (suit === 'C') return characterSVG(n);
+    if (suit === 'B') return bambooSVG(n);
+    if (suit === 'D') return dotSVG(n);
+    return '';
+  }
+
+  function makeTileEl(tile) {
+    const div = document.createElement('div');
+    div.className = 'tile';
+    div.innerHTML = tileSVG(tile);
+    div.title = formatTile(tile);
+    return div;
+  }
+
+  function formatTile(tile) {
+    const map = { EW: 'East', SW: 'South', WW: 'West', NW: 'North', RD: 'Red Dragon', GD: 'Green Dragon', WD: 'White Dragon' };
+    if (map[tile]) return map[tile];
+    if (tile.startsWith('F')) return `Flower ${tile[1]}`;
+    if (tile.startsWith('S')) return `Season ${tile[1]}`;
+    const n = tile.slice(0, -1);
+    const suit = tile.slice(-1);
+    const suitMap = { D: 'Dot', B: 'Bamboo', C: 'Character' };
+    return `${n} ${suitMap[suit] || suit}`;
+  }
+
+  function renderActionBar(room, me, isMyTurn) {
+    const bar = document.getElementById('actionBar');
+    bar.innerHTML = '';
+    if (!me) return;
+
+    if (room.phase === 'finished') {
+      if (room.round?.matchOver) {
+        const doneMsg = document.createElement('div');
+        doneMsg.textContent = 'Match complete — full East→North cycle finished.';
+        bar.appendChild(doneMsg);
+        const backBtn = document.createElement('button');
+        backBtn.textContent = 'Back to Dashboard';
+        backBtn.addEventListener('click', () => returnToDashboard());
+        bar.appendChild(backBtn);
+      } else {
+        const nextBtn = document.createElement('button');
+        nextBtn.textContent = 'Start Next Hand';
+        nextBtn.addEventListener('click', () => wsSend({ type: 'next_hand' }));
+        bar.appendChild(nextBtn);
+      }
+      return;
+    }
+
+    if (room.phase !== 'playing') return;
+
+    if (isMyTurn) {
+      if (me.hand.length % 3 === 2) {
+        // needs to draw
+        const drawBtn = document.createElement('button');
+        drawBtn.textContent = 'Draw Tile';
+        drawBtn.addEventListener('click', () => wsSend({ type: 'draw' }));
+        bar.appendChild(drawBtn);
+      } else {
+        const discardBtn = document.createElement('button');
+        discardBtn.textContent = state.selectedTile ? `Discard ${formatTile(state.selectedTile)}` : 'Select a tile to discard';
+        discardBtn.disabled = !state.selectedTile;
+        discardBtn.addEventListener('click', () => {
+          wsSend({ type: 'discard', tile: state.selectedTile });
+          state.selectedTile = null;
+        });
+        bar.appendChild(discardBtn);
+
+        const winBtn = document.createElement('button');
+        winBtn.className = 'secondary';
+        winBtn.textContent = 'Declare Mahjong';
+        winBtn.addEventListener('click', () => wsSend({ type: 'declare_win' }));
+        bar.appendChild(winBtn);
+      }
+    } else if (room.currentDiscard) {
+      const pungBtn = document.createElement('button');
+      pungBtn.className = 'secondary';
+      pungBtn.textContent = 'Pung';
+      pungBtn.addEventListener('click', () => wsSend({ type: 'claim_pung' }));
+      bar.appendChild(pungBtn);
+
+      const kongBtn = document.createElement('button');
+      kongBtn.className = 'secondary';
+      kongBtn.textContent = 'Kong';
+      kongBtn.addEventListener('click', () => wsSend({ type: 'claim_kong' }));
+      bar.appendChild(kongBtn);
+
+      const chowBtn = document.createElement('button');
+      chowBtn.className = 'secondary';
+      chowBtn.textContent = 'Chow';
+      chowBtn.addEventListener('click', () => wsSend({ type: 'claim_chow' }));
+      bar.appendChild(chowBtn);
+
+      const winBtn = document.createElement('button');
+      winBtn.textContent = 'Declare Mahjong';
+      winBtn.addEventListener('click', () => wsSend({ type: 'declare_win' }));
+      bar.appendChild(winBtn);
+    }
+  }
+
+  function onGameWon(msg) {
+    alert(`${msg.seat} won! Fan: ${msg.score.fan} (${msg.score.breakdown.join(', ')})`);
+    setButtonsEnabled(true);
+  }
+
+  // ---------- Init: check existing session ----------
+  (async function init() {
+    try {
+      const user = await apiCall('/api/me');
+      state.user = user;
+      enterDashboard();
+    } catch {
+      showScreen('auth');
+    }
+  })();
+</script>
+</body>
+</html>

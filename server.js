@@ -1,0 +1,522 @@
+import express from 'express';
+import { WebSocketServer } from 'ws';
+import http from 'http';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import cookie from 'cookie';
+import webpush from 'web-push';
+import { Resend } from 'resend';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+import { initDB, all, get, run } from './db.js';
+import * as G from './game.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const app = express();
+const server = http.createServer(app);
+
+const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-me';
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const EMAIL_DOMAIN = process.env.EMAIL_DOMAIN ?? 'example.com';
+const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
+
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
+const VAPID_EMAIL = process.env.VAPID_EMAIL ?? 'admin@example.com';
+const pushConfigured = Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
+if (pushConfigured) {
+  webpush.setVapidDetails(`mailto:${VAPID_EMAIL}`, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+}
+
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+// ---------- Auth helpers ----------
+
+function signToken(user) {
+  return jwt.sign({ id: user.id, email: user.email, name: user.name }, JWT_SECRET, { expiresIn: '30d' });
+}
+
+function setAuthCookie(res, token) {
+  res.setHeader('Set-Cookie', cookie.serialize('token', token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 30 * 24 * 60 * 60,
+    path: '/',
+  }));
+}
+
+function requireAuth(req, res, next) {
+  try {
+    const cookies = cookie.parse(req.headers.cookie ?? '');
+    const token = cookies.token;
+    if (!token) return res.status(401).json({ error: 'Not authenticated' });
+    req.user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: 'Invalid or expired session' });
+  }
+}
+
+// ---------- Auth routes ----------
+
+app.post('/api/register', async (req, res) => {
+  try {
+    const { email, name, password } = req.body ?? {};
+    if (!email || !name || !password) return res.status(400).json({ error: 'Missing fields' });
+    if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+
+    const existing = get('SELECT id FROM users WHERE email = ?', [email.toLowerCase()]);
+    if (existing) return res.status(409).json({ error: 'Email already registered' });
+
+    const hash = bcrypt.hashSync(password, 10);
+    run('INSERT INTO users (email, name, password_hash) VALUES (?, ?, ?)', [email.toLowerCase(), name, hash]);
+    const user = get('SELECT * FROM users WHERE email = ?', [email.toLowerCase()]);
+
+    const token = signToken(user);
+    setAuthCookie(res, token);
+    res.json({ id: user.id, email: user.email, name: user.name });
+  } catch (err) {
+    console.error('Register error:', err);
+    res.status(500).json({ error: 'Registration failed' });
+  }
+});
+
+app.post('/api/login', async (req, res) => {
+  try {
+    const { email, password } = req.body ?? {};
+    if (!email || !password) return res.status(400).json({ error: 'Missing fields' });
+
+    const user = get('SELECT * FROM users WHERE email = ?', [email.toLowerCase()]);
+    if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    const token = signToken(user);
+    setAuthCookie(res, token);
+    res.json({ id: user.id, email: user.email, name: user.name });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+app.post('/api/logout', (req, res) => {
+  setAuthCookie(res, '');
+  res.json({ ok: true });
+});
+
+app.get('/api/me', requireAuth, (req, res) => {
+  res.json(req.user);
+});
+
+// Password reset: request OTP
+app.post('/api/password-reset/request', async (req, res) => {
+  try {
+    const { email } = req.body ?? {};
+    if (!email) return res.status(400).json({ error: 'Email required' });
+    const user = get('SELECT * FROM users WHERE email = ?', [email.toLowerCase()]);
+    // Always respond success to avoid leaking which emails are registered
+    if (!user) return res.json({ ok: true });
+
+    const otp = String(Math.floor(100000 + Math.random() * 900000));
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    run('INSERT INTO otp_requests (email, otp, expires_at) VALUES (?, ?, ?)', [email.toLowerCase(), otp, expiresAt]);
+
+    if (resend) {
+      await resend.emails.send({
+        from: `Mahjong <noreply@${EMAIL_DOMAIN}>`,
+        to: email,
+        subject: 'Your password reset code',
+        html: `<p>Your verification code is <strong>${otp}</strong>. It expires in 15 minutes.</p>`,
+      });
+    } else {
+      console.log(`[dev] OTP for ${email}: ${otp}`);
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('OTP request error:', err);
+    res.status(500).json({ error: 'Could not send reset code' });
+  }
+});
+
+app.post('/api/password-reset/verify', (req, res) => {
+  try {
+    const { email, otp } = req.body ?? {};
+    const record = get(
+      `SELECT * FROM otp_requests WHERE email = ? AND otp = ? AND used = 0 ORDER BY id DESC LIMIT 1`,
+      [email?.toLowerCase(), otp]
+    );
+    if (!record) return res.status(400).json({ error: 'Invalid code' });
+    if (new Date(record.expires_at) < new Date()) return res.status(400).json({ error: 'Code expired' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('OTP verify error:', err);
+    res.status(500).json({ error: 'Verification failed' });
+  }
+});
+
+app.post('/api/password-reset/complete', (req, res) => {
+  try {
+    const { email, otp, newPassword } = req.body ?? {};
+    if (!newPassword || newPassword.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    const record = get(
+      `SELECT * FROM otp_requests WHERE email = ? AND otp = ? AND used = 0 ORDER BY id DESC LIMIT 1`,
+      [email?.toLowerCase(), otp]
+    );
+    if (!record) return res.status(400).json({ error: 'Invalid code' });
+    if (new Date(record.expires_at) < new Date()) return res.status(400).json({ error: 'Code expired' });
+
+    const hash = bcrypt.hashSync(newPassword, 10);
+    run('UPDATE users SET password_hash = ? WHERE email = ?', [hash, email.toLowerCase()]);
+    run('UPDATE otp_requests SET used = 1 WHERE id = ?', [record.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Password reset complete error:', err);
+    res.status(500).json({ error: 'Reset failed' });
+  }
+});
+
+// ---------- Push notification routes ----------
+
+app.get('/api/push/vapid-key', (req, res) => {
+  res.json({ key: VAPID_PUBLIC_KEY ?? null });
+});
+
+app.get('/api/push/enabled', (req, res) => {
+  res.json({ enabled: pushConfigured });
+});
+
+app.post('/api/push/subscribe', requireAuth, (req, res) => {
+  try {
+    const sub = req.body;
+    if (!sub?.endpoint) return res.status(400).json({ error: 'Invalid subscription' });
+    run(
+      `INSERT OR REPLACE INTO push_subscriptions (user_id, endpoint, subscription_json) VALUES (?, ?, ?)`,
+      [req.user.id, sub.endpoint, JSON.stringify(sub)]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Push subscribe error:', err);
+    res.status(500).json({ error: 'Subscribe failed' });
+  }
+});
+
+app.post('/api/push/unsubscribe', requireAuth, (req, res) => {
+  try {
+    const { endpoint } = req.body ?? {};
+    run('DELETE FROM push_subscriptions WHERE user_id = ? AND endpoint = ?', [req.user.id, endpoint]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Push unsubscribe error:', err);
+    res.status(500).json({ error: 'Unsubscribe failed' });
+  }
+});
+
+app.get('/api/push/status', requireAuth, (req, res) => {
+  const subs = all('SELECT endpoint FROM push_subscriptions WHERE user_id = ?', [req.user.id]);
+  res.json({ subscribed: subs.length > 0 });
+});
+
+async function notifyUser(userId, payload) {
+  if (!pushConfigured) return;
+  const subs = all('SELECT * FROM push_subscriptions WHERE user_id = ?', [userId]);
+  for (const s of subs) {
+    try {
+      await webpush.sendNotification(JSON.parse(s.subscription_json), JSON.stringify(payload));
+    } catch (err) {
+      console.error('Push send failed, removing stale subscription:', err.message);
+      run('DELETE FROM push_subscriptions WHERE id = ?', [s.id]);
+    }
+  }
+}
+
+// ---------- WebSocket game server ----------
+
+const wss = new WebSocketServer({ server });
+const clients = new Map(); // ws -> { roomCode, playerId, userId, displayName }
+const rooms = new Map();   // roomCode -> room state (see game.js createRoom)
+
+function send(ws, msg) {
+  if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
+}
+
+function broadcast(room, msg, exceptWs = null) {
+  for (const [ws, meta] of clients.entries()) {
+    if (meta.roomCode === room.code && ws !== exceptWs) send(ws, msg);
+  }
+}
+
+function publicRoomView(room, forSeat) {
+  return {
+    code: room.code,
+    phase: room.phase,
+    turnSeat: room.turnSeat,
+    round: room.round,
+    roundWind: G.getRoundWind(room),
+    currentDiscard: room.currentDiscard,
+    wallCount: room.wall.length,
+    players: room.players.map(p => ({
+      playerId: p.playerId,
+      displayName: p.displayName,
+      seat: p.seat,
+      seatWind: G.getSeatWind(room, p.seat),
+      score: p.score,
+      handCount: p.hand.length,
+      exposed: p.exposed,
+      flowers: p.flowers,
+      hand: p.seat === forSeat ? p.hand : undefined,
+    })),
+  };
+}
+
+function broadcastRoomState(room) {
+  for (const [ws, meta] of clients.entries()) {
+    if (meta.roomCode !== room.code) continue;
+    const player = room.players.find(p => p.playerId === meta.playerId);
+    send(ws, { type: 'room_state', room: publicRoomView(room, player?.seat) });
+  }
+}
+
+function genRoomCode() {
+  return Math.random().toString(36).slice(2, 7).toUpperCase();
+}
+
+function persistRoom(room) {
+  try {
+    run(
+      `INSERT INTO games (room_code, phase, state_json) VALUES (?, ?, ?)
+       ON CONFLICT(room_code) DO UPDATE SET phase = excluded.phase, state_json = excluded.state_json`,
+      [room.code, room.phase, JSON.stringify({ turnSeat: room.turnSeat, players: room.players.map(p => ({ seat: p.seat, score: p.score })) })]
+    );
+  } catch (err) {
+    console.error('persistRoom failed:', err);
+  }
+}
+
+wss.on('connection', (ws) => {
+  clients.set(ws, { roomCode: null, playerId: null, userId: null, displayName: null });
+
+  ws.on('message', (raw) => {
+    let msg;
+    try {
+      msg = JSON.parse(raw.toString());
+    } catch {
+      return send(ws, { type: 'error', message: 'Invalid message format' });
+    }
+    try {
+      handleMessage(ws, msg);
+    } catch (err) {
+      console.error('handleMessage error:', err);
+      send(ws, { type: 'error', message: err.message ?? 'Something went wrong' });
+    }
+  });
+
+  ws.on('close', () => {
+    const meta = clients.get(ws);
+    clients.delete(ws);
+    if (meta?.roomCode) {
+      const room = rooms.get(meta.roomCode);
+      if (room) broadcast(room, { type: 'player_disconnected', playerId: meta.playerId }, ws);
+    }
+  });
+});
+
+function handleMessage(ws, msg) {
+  const meta = clients.get(ws);
+
+  switch (msg.type) {
+    case 'create_room': {
+      const roomCode = genRoomCode();
+      const playerId = msg.playerId ?? crypto.randomUUID();
+      const room = G.createRoom(roomCode, playerId);
+      G.addPlayer(room, { playerId, userId: msg.userId, displayName: msg.displayName ?? 'Player' });
+      rooms.set(roomCode, room);
+      clients.set(ws, { roomCode, playerId, userId: msg.userId, displayName: msg.displayName });
+      persistRoom(room);
+      send(ws, { type: 'room_created', roomCode });
+      broadcastRoomState(room);
+      break;
+    }
+    case 'join_room': {
+      const room = rooms.get(msg.roomCode);
+      if (!room) return send(ws, { type: 'error', message: 'Room not found' });
+      if (room.phase !== 'waiting') return send(ws, { type: 'error', message: 'Game already in progress' });
+      const playerId = msg.playerId ?? crypto.randomUUID();
+      const seat = G.addPlayer(room, { playerId, userId: msg.userId, displayName: msg.displayName ?? 'Player' });
+      clients.set(ws, { roomCode: room.code, playerId, userId: msg.userId, displayName: msg.displayName });
+      persistRoom(room);
+      send(ws, { type: 'room_joined', roomCode: room.code, seat });
+      broadcastRoomState(room);
+      if (room.players.length === 4) {
+        G.startGame(room);
+        persistRoom(room);
+        broadcastRoomState(room);
+        broadcast(room, { type: 'game_started' });
+      }
+      break;
+    }
+    case 'discard': {
+      const room = requireRoom(meta);
+      const player = requirePlayer(room, meta.playerId);
+      if (room.turnSeat !== player.seat) throw new Error('Not your turn');
+      G.discardTile(room, player, msg.tile);
+      room.turnSeat = G.nextSeat(player.seat);
+      persistRoom(room);
+      broadcastRoomState(room);
+      broadcast(room, { type: 'tile_discarded', tile: msg.tile, fromSeat: player.seat });
+      break;
+    }
+    case 'draw': {
+      const room = requireRoom(meta);
+      const player = requirePlayer(room, meta.playerId);
+      if (room.turnSeat !== player.seat) throw new Error('Not your turn');
+      const tile = G.drawTile(room, player);
+      if (!tile) {
+        G.advanceHand(room, { isDraw: true });
+        room.phase = 'finished';
+        persistRoom(room);
+        broadcastRoomState(room);
+        broadcast(room, { type: 'wall_empty', round: room.round, matchOver: room.round.matchOver });
+        break;
+      }
+      persistRoom(room);
+      broadcastRoomState(room);
+      break;
+    }
+    case 'claim_pung': {
+      const room = requireRoom(meta);
+      const player = requirePlayer(room, meta.playerId);
+      if (!room.currentDiscard) throw new Error('No discard to claim');
+      const { tile, fromSeat } = room.currentDiscard;
+      if (!G.canPung(player.hand, tile)) throw new Error('Cannot pung this tile');
+      G.applyPung(room, player, tile, fromSeat);
+      room.turnSeat = player.seat;
+      persistRoom(room);
+      broadcastRoomState(room);
+      broadcast(room, { type: 'pung_claimed', playerId: player.playerId, tile });
+      break;
+    }
+    case 'claim_kong': {
+      const room = requireRoom(meta);
+      const player = requirePlayer(room, meta.playerId);
+      const concealed = Boolean(msg.concealed);
+      let tile = msg.tile;
+      let fromSeat = player.seat;
+      if (!concealed) {
+        if (!room.currentDiscard) throw new Error('No discard to claim');
+        tile = room.currentDiscard.tile;
+        fromSeat = room.currentDiscard.fromSeat;
+        if (!G.canKongFromDiscard(player.hand, tile)) throw new Error('Cannot kong this tile');
+      }
+      G.applyKong(room, player, tile, fromSeat, concealed);
+      room.turnSeat = player.seat;
+      persistRoom(room);
+      broadcastRoomState(room);
+      broadcast(room, { type: 'kong_claimed', playerId: player.playerId, tile, concealed });
+      break;
+    }
+    case 'claim_chow': {
+      const room = requireRoom(meta);
+      const player = requirePlayer(room, meta.playerId);
+      if (!room.currentDiscard) throw new Error('No discard to claim');
+      const { tile, fromSeat } = room.currentDiscard;
+      const options = G.canChow(player.hand, tile, player.seat, fromSeat);
+      if (!options || options.length === 0) throw new Error('Cannot chow this tile');
+      const sequence = msg.sequence
+        ? options.find(o => JSON.stringify(o) === JSON.stringify(msg.sequence))
+        : options[0];
+      if (!sequence) throw new Error('Invalid chow sequence');
+      G.applyChow(room, player, sequence, tile, fromSeat);
+      room.turnSeat = player.seat;
+      persistRoom(room);
+      broadcastRoomState(room);
+      broadcast(room, { type: 'chow_claimed', playerId: player.playerId, sequence });
+      break;
+    }
+    case 'declare_win': {
+      const room = requireRoom(meta);
+      const player = requirePlayer(room, meta.playerId);
+      const selfDraw = !room.currentDiscard || room.currentDiscard.fromSeat === player.seat;
+      const winningTile = selfDraw ? player.hand[player.hand.length - 1] : room.currentDiscard.tile;
+      const handForCheck = selfDraw ? player.hand.slice(0, -1) : player.hand;
+      const result = G.checkWin(handForCheck, player.exposed, winningTile);
+      if (!result.win) throw new Error('Hand does not qualify for Mahjong');
+      const roundWind = G.getRoundWind(room);
+      const seatWind = G.getSeatWind(room, player.seat);
+      const score = G.scoreHand(player, player.exposed, handForCheck, winningTile, {
+        selfDraw, roundWind, seatWind,
+      });
+      const standings = G.settleScore(room, player.seat, score.fan, {
+        selfDraw, discarderSeat: room.currentDiscard?.fromSeat,
+      });
+      G.advanceHand(room, { winnerSeat: player.seat });
+      room.phase = 'finished';
+      persistRoom(room);
+      broadcastRoomState(room);
+      broadcast(room, {
+        type: 'game_won', playerId: player.playerId, seat: player.seat, result, score, standings,
+        round: room.round, matchOver: room.round.matchOver,
+      });
+      for (const p of room.players) {
+        if (p.userId) notifyUser(p.userId, { title: 'Mahjong!', body: `${player.displayName} won the game.` });
+      }
+      break;
+    }
+    case 'next_hand': {
+      const room = requireRoom(meta);
+      if (room.phase !== 'finished') throw new Error('Current hand is not finished yet');
+      if (room.round.matchOver) throw new Error('Match is already complete (full East\u2192North cycle finished)');
+      G.startGame(room);
+      persistRoom(room);
+      broadcastRoomState(room);
+      broadcast(room, { type: 'game_started', round: room.round });
+      break;
+    }
+    default:
+      send(ws, { type: 'error', message: `Unknown message type: ${msg.type}` });
+  }
+}
+
+function requireRoom(meta) {
+  const room = rooms.get(meta.roomCode);
+  if (!room) throw new Error('Not in a room');
+  return room;
+}
+
+function requirePlayer(room, playerId) {
+  const player = room.players.find(p => p.playerId === playerId);
+  if (!player) throw new Error('Player not in this room');
+  return player;
+}
+
+// ---------- Error handling ----------
+
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled rejection:', reason);
+});
+
+// ---------- Startup ----------
+
+const PORT = process.env.PORT ?? 3000;
+
+export async function startServer() {
+  await initDB();
+  return new Promise((resolve) => {
+    server.listen(PORT, () => {
+      console.log(`Mahjong server listening on port ${PORT}`);
+      resolve(server);
+    });
+  });
+}
+
+if (process.env.NODE_ENV !== 'test') {
+  startServer();
+}
+
+export { app, server, rooms, clients };

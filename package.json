@@ -1,0 +1,22 @@
+{
+  "name": "traditional-mahjong",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Real-time multiplayer Traditional (Chinese) Mahjong",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/game.test.js",
+    "test:all": "node --test test/game.test.js test/e2e.test.js test/regression.test.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.18.0",
+    "sql.js": "^1.11.0",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "resend": "^4.0.1",
+    "web-push": "^3.6.7",
+    "cookie": "^0.7.1"
+  }
+}
