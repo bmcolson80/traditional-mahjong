@@ -496,11 +496,29 @@ function handleMessage(ws, msg) {
       const playerId = msg.playerId ?? crypto.randomUUID();
       const room = G.createRoom(roomCode, playerId);
       G.addPlayer(room, { playerId, userId: msg.userId, displayName: msg.displayName ?? 'Player' });
+      // Pre-configured AI players added from the dashboard
+      const aiConfigs = Array.isArray(msg.aiPlayers) ? msg.aiPlayers.slice(0, 3) : [];
+      for (const cfg of aiConfigs) {
+        const skill = ['rookie','veteran','master'].includes(cfg.skill) ? cfg.skill : 'rookie';
+        const aiCount = room.players.filter(p => p.isAI && p.aiSkill === skill).length;
+        const aiPlayerId = `ai-${crypto.randomUUID()}`;
+        G.addPlayer(room, { playerId: aiPlayerId, userId: null, displayName: AI.aiDisplayName(skill, aiCount) });
+        const aiPlayer = room.players.find(p => p.playerId === aiPlayerId);
+        aiPlayer.isAI = true;
+        aiPlayer.aiSkill = skill;
+      }
       rooms.set(roomCode, room);
       clients.set(ws, { roomCode, playerId, userId: msg.userId, displayName: msg.displayName });
       persistRoom(room);
       send(ws, { type: 'room_created', roomCode });
       broadcastRoomState(room);
+      if (room.players.length === 4) {
+        G.startGame(room);
+        persistRoom(room);
+        broadcastRoomState(room);
+        broadcast(room, { type: 'game_started', round: room.round });
+        scheduleAiTurn(room);
+      }
       break;
     }
     case 'add_ai': {

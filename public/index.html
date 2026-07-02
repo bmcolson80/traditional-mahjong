@@ -6,270 +6,322 @@
 <title>Traditional Mahjong</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;700;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Lato:wght@300;400;700&family=Noto+Serif+SC:wght@500;700;900&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --bg: #0f3d2e;
-    --bg-light: #17573f;
-    --accent: #d4af37;
-    --text: #f4ead1;
-    --danger: #c0392b;
-    --tile-bg: #fdf6e3;
-    --tile-text: #1a1a1a;
-    --radius: 10px;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    min-height: 100vh;
-  }
-  .screen { display: none; padding: clamp(12px, 4vw, 32px); min-height: 100vh; }
-  .screen.active { display: flex; flex-direction: column; }
-  h1 { font-size: clamp(1.4rem, 5vw, 2.2rem); margin: 0 0 1rem; color: var(--accent); }
-  h2 { font-size: clamp(1.1rem, 4vw, 1.6rem); margin: 0 0 0.75rem; }
-  input, button {
-    font-size: clamp(0.95rem, 3vw, 1.05rem);
-    padding: 0.7em 1em;
-    border-radius: var(--radius);
-    border: none;
-    margin-bottom: 0.6em;
-    width: 100%;
-  }
-  input { background: var(--bg-light); color: var(--text); border: 1px solid #2d7a56; }
-  button {
-    background: var(--accent);
-    color: #1a1a1a;
-    font-weight: 600;
-    cursor: pointer;
-    transition: transform 0.1s ease;
-  }
-  button:active { transform: scale(0.97); }
-  button:disabled { opacity: 0.5; cursor: default; }
-  button.secondary { background: var(--bg-light); color: var(--text); border: 1px solid var(--accent); }
-  .card { background: var(--bg-light); border-radius: var(--radius); padding: 1rem; margin-bottom: 1rem; }
-  .error { color: #ff8a80; font-size: 0.9rem; min-height: 1.2em; }
-  .link-btn { background: none; color: var(--accent); text-decoration: underline; width: auto; padding: 0.4em; }
+/* ── Design system (matches Colmedorno) ─────────────────────────────────── */
+:root{--navy:#1a1f3a;--navy-light:#252c50;--navy-mid:#2e3760;--gold:#c9a227;--gold-light:#e8c547;--cream:#f5ecd7;--cream-dark:#e8d8b8;--shadow:rgba(0,0,0,0.4);--radius:12px;--radius-sm:6px;--tile-bg:#fdf6e3;}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:var(--navy);color:var(--cream);font-family:'Lato',sans-serif;min-height:100vh;overflow-x:hidden}
+.screen{display:none;min-height:100vh}
+.screen.active{display:block}
+.centered{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:24px;background:radial-gradient(ellipse at 50% 0%,#2e3760 0%,var(--navy) 70%)}
 
-  .players-row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
-  .player-chip { background: var(--bg-light); padding: 0.5em 0.9em; border-radius: 20px; font-size: 0.85rem; }
-  .player-chip.turn { background: var(--accent); color: #1a1a1a; font-weight: 700; }
+/* ── Logo ───────────────────────────────────────────────────────────────── */
+.logo-area{text-align:center;margin-bottom:28px}
+.logo-tiles{display:grid;grid-template-columns:repeat(3,44px);gap:5px;margin:0 auto 14px;width:fit-content}
+.logo-tile{width:44px;height:44px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:0 4px 12px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.2);background:var(--navy-mid);border:1px solid rgba(201,162,39,.3);color:var(--gold);font-family:'Noto Serif SC',serif;font-weight:700}
+.logo-title{font-family:'Cinzel',serif;font-size:clamp(20px,6vw,38px);font-weight:700;letter-spacing:clamp(3px,1.5vw,8px);color:var(--gold);text-shadow:0 2px 20px rgba(201,162,39,.4);text-align:center}
+.logo-sub{font-size:11px;letter-spacing:4px;color:var(--cream-dark);opacity:.6;margin-top:5px;text-align:center}
 
-  .discard-area { text-align: center; padding: 1rem; margin-bottom: 1rem; }
-  .discard-tile { display: inline-block; }
+/* ── Cards ───────────────────────────────────────────────────────────────── */
+.card{background:var(--navy-light);border:1px solid rgba(201,162,39,.2);border-radius:var(--radius);padding:24px;width:100%;max-width:380px;box-shadow:0 8px 32px var(--shadow);margin-bottom:0}
+.card h2{font-family:'Cinzel',serif;font-size:13px;letter-spacing:3px;color:var(--gold);margin-bottom:20px;text-align:center}
+.field-group{margin-bottom:16px}
+label{display:block;font-size:11px;letter-spacing:2px;color:var(--cream-dark);opacity:.6;margin-bottom:6px;text-transform:uppercase}
+input[type=text],input[type=email],input[type=password]{width:100%;background:var(--navy);border:1px solid rgba(255,255,255,.15);border-radius:var(--radius-sm);color:var(--cream);font-family:'Lato',sans-serif;font-size:16px;padding:12px 14px;outline:none;transition:border-color .2s}
+input:focus{border-color:var(--gold)}
+input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight:700;text-transform:uppercase}
 
-  .hand-row { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; margin: 0.5rem 0; }
-  .tile {
-    background: var(--tile-bg);
-    border-radius: 6px;
-    width: clamp(34px, 9vw, 52px);
-    box-shadow: 0 2px 4px rgba(0,0,0,0.3), inset 0 -2px 0 rgba(0,0,0,0.08);
-    user-select: none;
-    -webkit-user-select: none;
-    overflow: hidden;
-    line-height: 0;
-  }
-  .tile svg { display: block; width: 100%; height: auto; }
-  .tile.selectable { cursor: pointer; }
-  .tile.selected { outline: 3px solid var(--danger); transform: translateY(-6px); }
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+.btn{width:100%;padding:13px;border:none;border-radius:var(--radius-sm);font-family:'Cinzel',serif;font-size:12px;letter-spacing:2px;cursor:pointer;transition:all .2s;margin-bottom:10px;display:block}
+.btn-primary{background:linear-gradient(135deg,var(--gold),#a07a1a);color:var(--navy);font-weight:700;box-shadow:0 4px 16px rgba(201,162,39,.3)}
+.btn-primary:active{transform:scale(.97)}
+.btn-primary:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.btn-secondary{background:transparent;border:1px solid rgba(201,162,39,.3);color:var(--gold)}
+.btn-secondary:active{background:rgba(201,162,39,.1)}
+.btn-danger{background:transparent;border:1px solid rgba(224,85,85,.3);color:#e08888}
+.btn-sm{padding:7px 12px;font-size:10px;margin-bottom:0;width:auto;display:inline-block}
+.link-btn{background:none;border:none;color:var(--gold);cursor:pointer;font-size:13px;text-decoration:underline;padding:0;font-family:'Lato',sans-serif}
+.error-msg{background:rgba(224,85,85,.1);border:1px solid rgba(224,85,85,.3);border-radius:var(--radius-sm);padding:10px 14px;font-size:13px;color:#e08888;margin-bottom:12px;display:none}
+.divider{text-align:center;color:rgba(255,255,255,.2);font-size:12px;letter-spacing:4px;margin:14px 0}
 
-  .exposed-sets { display: flex; gap: 8px; flex-wrap: wrap; margin: 0.4rem 0; }
-  .exposed-set { display: flex; gap: 2px; background: rgba(0,0,0,0.2); padding: 4px; border-radius: 6px; }
+/* ── Dashboard ───────────────────────────────────────────────────────────── */
+.dashboard-header{background:var(--navy-light);border-bottom:1px solid rgba(201,162,39,.2);padding:12px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;gap:8px}
+.dh-logo{font-family:'Cinzel',serif;font-size:16px;letter-spacing:4px;color:var(--gold)}
+.user-chip{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.avatar{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,var(--gold),#a07a1a);display:flex;align-items:center;justify-content:center;font-family:'Cinzel',serif;font-size:13px;font-weight:700;color:var(--navy)}
+.user-name-display{font-size:13px;color:var(--cream-dark);max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dashboard-body{padding:20px 16px;max-width:480px;margin:0 auto}
+.section-title{font-family:'Cinzel',serif;font-size:11px;letter-spacing:3px;color:var(--gold);margin-bottom:12px;margin-top:24px}
+.section-title:first-child{margin-top:0}
+.dash-card{background:var(--navy-light);border:1px solid rgba(201,162,39,.2);border-radius:var(--radius);padding:20px;margin-bottom:16px}
 
-  /* ---------- Bamboo table + tile rack (game screen) ---------- */
-  #game.screen.active {
-    background-color: #c9a24b;
-    background-image:
-      repeating-linear-gradient(45deg, rgba(255,255,255,0.10) 0px, rgba(255,255,255,0.10) 2px, transparent 2px, transparent 11px),
-      repeating-linear-gradient(-45deg, rgba(0,0,0,0.12) 0px, rgba(0,0,0,0.12) 2px, transparent 2px, transparent 11px),
-      linear-gradient(180deg, #dcb765, #ad8236);
-    background-attachment: fixed;
-  }
-  #game .card {
-    background: rgba(15, 25, 20, 0.6);
-    backdrop-filter: blur(2px);
-    -webkit-backdrop-filter: blur(2px);
-  }
-  #roundBanner { font-weight: 600; letter-spacing: 0.02em; }
+/* ── AI slot config (dashboard) ──────────────────────────────────────────── */
+.ai-slots{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
+.ai-slot{display:flex;align-items:center;gap:10px;background:var(--navy);border-radius:var(--radius-sm);padding:10px 12px;border:1px solid rgba(255,255,255,.08)}
+.ai-slot-label{font-size:13px;flex:1;color:var(--cream-dark)}
+.ai-difficulty-btns{display:flex;gap:4px}
+.diff-btn{padding:5px 9px;border-radius:4px;border:1px solid rgba(255,255,255,.15);background:transparent;color:rgba(255,255,255,.5);font-size:10px;letter-spacing:1px;cursor:pointer;font-family:'Lato',sans-serif;transition:all .2s}
+.diff-btn.sel-rookie{background:rgba(78,184,200,.2);border-color:#4eb8c8;color:#4eb8c8}
+.diff-btn.sel-veteran{background:rgba(212,160,23,.2);border-color:var(--gold);color:var(--gold)}
+.diff-btn.sel-master{background:rgba(201,64,64,.2);border-color:#c94040;color:#e08080}
+.remove-ai-slot{background:none;border:none;color:rgba(255,255,255,.3);cursor:pointer;font-size:16px;padding:0 2px;line-height:1}
+.add-ai-btn{width:100%;padding:10px;border-radius:var(--radius-sm);border:1px dashed rgba(201,162,39,.3);background:transparent;color:rgba(201,162,39,.6);font-family:'Cinzel',serif;font-size:11px;letter-spacing:2px;cursor:pointer;transition:all .2s;margin-bottom:14px}
+.add-ai-btn:hover{border-color:var(--gold);color:var(--gold)}
+.add-ai-btn:disabled{opacity:.3;cursor:not-allowed}
 
-  .rack {
-    position: relative;
-    background: linear-gradient(180deg, #9c6a34 0%, #7a4f24 85%, #5e3c1a 100%);
-    border-radius: 8px;
-    padding: 14px 10px 18px;
-    box-shadow: 0 6px 14px rgba(0,0,0,0.45), inset 0 2px 0 rgba(255,255,255,0.18);
-  }
-  .rack::after {
-    content: '';
-    position: absolute;
-    left: 10px; right: 10px; bottom: 8px; height: 5px;
-    background: rgba(0,0,0,0.3);
-    border-radius: 3px;
-  }
-  .rack .hand-row { margin: 0; position: relative; z-index: 1; }
-  .hand-hint { font-size: 0.75em; font-weight: 400; opacity: 0.75; }
+/* ── Notifications ───────────────────────────────────────────────────────── */
+.notif-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.06)}
+.notif-row:last-child{border-bottom:none}
+.notif-label{font-size:13px;color:var(--cream-dark)}
+.toggle{position:relative;display:inline-block;width:42px;height:24px;flex-shrink:0}
+.toggle input{opacity:0;width:0;height:0}
+.toggle-slider{position:absolute;cursor:pointer;inset:0;background:rgba(255,255,255,.15);border-radius:12px;transition:.3s}
+.toggle-slider:before{content:'';position:absolute;height:18px;width:18px;left:3px;bottom:3px;background:var(--cream-dark);border-radius:50%;transition:.3s}
+.toggle input:checked + .toggle-slider{background:var(--gold)}
+.toggle input:checked + .toggle-slider:before{transform:translateX(18px);background:var(--navy)}
 
-  /* ---------- Animations ---------- */
-  @keyframes tileDeal {
-    from { opacity: 0; transform: translateY(-130px) rotate(-10deg) scale(0.7); }
-    to   { opacity: 1; transform: translateY(0) rotate(0) scale(1); }
-  }
-  .tile.tile-deal {
-    animation: tileDeal 420ms cubic-bezier(.2,.8,.2,1) both;
-    animation-delay: calc(var(--deal-i, 0) * 55ms);
-  }
+/* ── Waiting room ────────────────────────────────────────────────────────── */
+.room-code-display{background:var(--navy);border:2px dashed var(--gold);border-radius:var(--radius-sm);text-align:center;padding:16px;margin-bottom:16px;cursor:pointer}
+.room-code-display .code{font-family:'Cinzel',serif;font-size:36px;letter-spacing:10px;color:var(--gold);font-weight:700}
+.room-code-display .code-label{font-size:10px;letter-spacing:3px;color:rgba(255,255,255,.4);margin-top:4px}
+.player-list{margin-bottom:14px}
+.player-item{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--navy);border-radius:var(--radius-sm);margin-bottom:6px;font-size:14px;color:var(--cream)}
+.player-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.ai-badge{font-size:10px;padding:2px 7px;border-radius:10px;margin-left:auto;letter-spacing:1px;font-family:'Cinzel',serif}
+.rookie-badge{background:rgba(78,184,200,.15);border:1px solid #4eb8c8;color:#4eb8c8}
+.veteran-badge{background:rgba(212,160,23,.15);border:1px solid var(--gold);color:var(--gold)}
+.master-badge{background:rgba(201,64,64,.15);border:1px solid #c94040;color:#e08080}
+.waiting-hint{text-align:center;font-size:11px;color:rgba(255,255,255,.3);letter-spacing:2px;padding:10px}
 
-  @keyframes tileToss {
-    0%   { opacity: 0; transform: scale(0.4) rotate(-18deg); }
-    65%  { opacity: 1; transform: scale(1.08) rotate(4deg); }
-    100% { opacity: 1; transform: scale(1) rotate(0); }
-  }
-  .tile.tile-toss { animation: tileToss 260ms ease-out; }
+/* ── Game screen: bamboo table + tile rack ───────────────────────────────── */
+#game.screen.active{display:block;background-color:#c9a24b;background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.10) 0px,rgba(255,255,255,.10) 2px,transparent 2px,transparent 11px),repeating-linear-gradient(-45deg,rgba(0,0,0,.12) 0px,rgba(0,0,0,.12) 2px,transparent 2px,transparent 11px),linear-gradient(180deg,#dcb765,#ad8236);background-attachment:fixed}
 
-  .tile { transition: transform 150ms ease, box-shadow 150ms ease; touch-action: none; }
-  .tile.dragging { transition: none; z-index: 50; box-shadow: 0 10px 18px rgba(0,0,0,0.5); cursor: grabbing; }
-  .tile.selectable { cursor: grab; }
+/* Game header (matches Colmedorno's game-header style) */
+.game-header{background:var(--navy-light);border-bottom:1px solid rgba(201,162,39,.2);padding:10px 14px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;gap:8px}
+.game-header .round-info{font-family:'Cinzel',serif;font-size:11px;letter-spacing:2px;color:var(--gold)}
+.game-header .turn-badge{font-size:11px;background:rgba(201,162,39,.15);border:1px solid rgba(201,162,39,.3);border-radius:20px;padding:4px 10px;color:var(--gold);font-family:'Cinzel',serif;letter-spacing:.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px}
+.menu-btn{background:none;border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.5);border-radius:6px;padding:5px 10px;cursor:pointer;font-size:14px;line-height:1;font-family:'Lato',sans-serif}
 
-  .action-bar { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 1rem; }
-  .action-bar button { width: auto; flex: 1; min-width: 100px; }
+.scores-bar{display:flex;gap:6px;padding:8px 12px;overflow-x:auto;background:var(--navy-mid);border-bottom:1px solid rgba(255,255,255,.05)}
+.score-chip{display:flex;flex-direction:column;align-items:center;min-width:70px;padding:6px 8px;border-radius:var(--radius-sm);background:var(--navy);border:1px solid rgba(255,255,255,.08);flex-shrink:0}
+.score-chip.active-turn{border-color:var(--gold);background:rgba(201,162,39,.08)}
+.score-chip .sc-name{font-size:10px;color:rgba(255,255,255,.5);white-space:nowrap;max-width:80px;overflow:hidden;text-overflow:ellipsis}
+.score-chip .sc-pts{font-family:'Cinzel',serif;font-size:18px;color:var(--cream);font-weight:700}
+.sc-ai-tag{font-size:8px;letter-spacing:1px;opacity:.6;margin-top:1px}
+.ai-thinking{display:flex;align-items:center;gap:8px;padding:7px 14px;background:rgba(155,89,182,.08);border-bottom:1px solid rgba(155,89,182,.15);font-size:11px;color:#c39bd3;letter-spacing:1px}
+.ai-dots span{display:inline-block;width:5px;height:5px;border-radius:50%;background:#c39bd3;margin:0 2px;animation:dotbounce .9s infinite}
+.ai-dots span:nth-child(2){animation-delay:.2s}
+.ai-dots span:nth-child(3){animation-delay:.4s}
+@keyframes dotbounce{0%,80%,100%{transform:scale(.6);opacity:.4}40%{transform:scale(1);opacity:1}}
 
-  .modal-overlay {
-    display: none;
-    position: fixed; inset: 0;
-    background: rgba(0,0,0,0.6);
-    align-items: center; justify-content: center;
-    z-index: 100;
-  }
-  .modal-overlay.active { display: flex; }
-  .modal {
-    background: var(--bg-light);
-    border-radius: var(--radius);
-    padding: 1.5rem;
-    max-width: 90vw;
-    width: 360px;
-  }
+.game-body{padding:12px}
+.game-section{background:rgba(15,25,20,.6);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);border-radius:var(--radius);padding:12px;margin-bottom:10px;border:1px solid rgba(201,162,39,.15)}
+.game-section-title{font-family:'Cinzel',serif;font-size:10px;letter-spacing:2px;color:rgba(201,162,39,.7);margin-bottom:8px}
+.discard-area{text-align:center}
+.discard-tile{display:inline-block;margin-top:6px}
+.exposed-sets{display:flex;gap:8px;flex-wrap:wrap}
+.exposed-set{display:flex;gap:2px;background:rgba(0,0,0,.2);padding:4px;border-radius:6px}
 
-  #toggleContainer { display: flex; align-items: center; gap: 0.5em; margin-top: 1rem; }
-  #toggleContainer input { width: auto; }
+/* Tile rack */
+.rack{position:relative;background:linear-gradient(180deg,#9c6a34 0%,#7a4f24 85%,#5e3c1a 100%);border-radius:8px;padding:14px 10px 18px;box-shadow:0 6px 14px rgba(0,0,0,.45),inset 0 2px 0 rgba(255,255,255,.18)}
+.rack::after{content:'';position:absolute;left:10px;right:10px;bottom:8px;height:5px;background:rgba(0,0,0,.3);border-radius:3px}
+.rack .hand-row{margin:0;position:relative;z-index:1}
+.hand-hint{font-size:10px;font-weight:400;opacity:.6;letter-spacing:1px;font-family:'Cinzel',serif}
+
+/* Action bar */
+.action-bar{background:var(--navy-light);border-top:1px solid rgba(201,162,39,.2);padding:12px;display:flex;gap:8px;flex-wrap:wrap}
+.action-bar .btn{margin:0;flex:1;min-width:100px}
+
+/* Tile appearance */
+.hand-row{display:flex;flex-wrap:wrap;gap:4px;justify-content:center;margin:.5rem 0}
+.tile{background:var(--tile-bg);border-radius:6px;width:clamp(34px,9vw,52px);box-shadow:0 2px 4px rgba(0,0,0,.3),inset 0 -2px 0 rgba(0,0,0,.08);user-select:none;-webkit-user-select:none;overflow:hidden;line-height:0;transition:transform 150ms ease,box-shadow 150ms ease;touch-action:none}
+.tile svg{display:block;width:100%;height:auto}
+.tile.selectable{cursor:grab}
+.tile.selected{outline:3px solid #c94040;transform:translateY(-6px)}
+.tile.dragging{transition:none;z-index:50;box-shadow:0 10px 18px rgba(0,0,0,.5);cursor:grabbing}
+
+/* Animations */
+@keyframes tileDeal{from{opacity:0;transform:translateY(-130px) rotate(-10deg) scale(.7)}to{opacity:1;transform:translateY(0) rotate(0) scale(1)}}
+.tile.tile-deal{animation:tileDeal 420ms cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--deal-i,0) * 55ms)}
+@keyframes tileToss{0%{opacity:0;transform:scale(.4) rotate(-18deg)}65%{opacity:1;transform:scale(1.08) rotate(4deg)}100%{opacity:1;transform:scale(1) rotate(0)}}
+.tile.tile-toss{animation:tileToss 260ms ease-out}
+
+/* Modal */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:500;align-items:center;justify-content:center;padding:20px}
+.modal-overlay.active{display:flex}
+.modal{background:var(--navy-light);border:1px solid rgba(201,162,39,.3);border-radius:var(--radius);padding:24px;width:100%;max-width:340px;max-height:80vh;overflow-y:auto}
+.modal h2{font-family:'Cinzel',serif;font-size:14px;letter-spacing:3px;color:var(--gold);margin-bottom:16px;text-align:center}
+
+/* Toast */
+.toast{position:fixed;top:70px;left:50%;transform:translateX(-50%);background:var(--navy-mid);border:1px solid rgba(201,162,39,.4);border-radius:20px;padding:8px 20px;font-size:12px;color:var(--gold);z-index:999;white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,.5);transition:opacity .4s;pointer-events:none;font-family:'Cinzel',serif;letter-spacing:1px;opacity:0}
 </style>
 </head>
 <body>
 
-<!-- AUTH SCREEN -->
+<!-- ═══ AUTH SCREEN ═══ -->
 <div id="auth" class="screen active">
-  <h1>🀄 Traditional Mahjong</h1>
-  <div class="card">
-    <div id="authTabs" style="display:flex; gap:0.5rem; margin-bottom:1rem;">
-      <button id="tabLogin" class="secondary" style="flex:1">Log In</button>
-      <button id="tabRegister" class="secondary" style="flex:1">Register</button>
+  <div class="centered">
+    <div class="logo-area">
+      <div class="logo-tiles">
+        <div class="logo-tile">東</div><div class="logo-tile">中</div><div class="logo-tile">發</div>
+        <div class="logo-tile">●</div><div class="logo-tile" style="opacity:.5">萬</div><div class="logo-tile" style="opacity:.5">北</div>
+        <div class="logo-tile" style="opacity:.3">|</div><div class="logo-tile" style="opacity:.3">西</div><div class="logo-tile" style="opacity:.2">南</div>
+      </div>
+      <div class="logo-title">MAHJONG</div>
+      <div class="logo-sub">TRADITIONAL CHINESE</div>
     </div>
 
-    <div id="loginForm">
-      <input id="loginEmail" type="email" placeholder="Email" autocomplete="email">
-      <input id="loginPassword" type="password" placeholder="Password" autocomplete="current-password">
-      <button id="loginBtn">Log In</button>
-      <button class="link-btn" id="forgotBtn">Forgot password?</button>
+    <!-- Login card -->
+    <div class="card" id="loginCard">
+      <h2>SIGN IN</h2>
+      <div class="error-msg" id="authError"></div>
+      <div class="field-group"><label>Email</label><input type="email" id="loginEmail" placeholder="you@example.com" autocomplete="email"></div>
+      <div class="field-group"><label>Password</label><input type="password" id="loginPassword" placeholder="••••••••" autocomplete="current-password"></div>
+      <button class="btn btn-primary" id="loginBtn">Sign In</button>
+      <div style="text-align:center;font-size:13px;color:rgba(255,255,255,.4)">
+        No account? <button class="link-btn" onclick="showAuthCard('registerCard')">Create one</button>
+        &nbsp;·&nbsp;
+        <button class="link-btn" id="forgotBtn">Forgot password?</button>
+      </div>
     </div>
 
-    <div id="registerForm" style="display:none;">
-      <input id="regName" type="text" placeholder="Display name">
-      <input id="regEmail" type="email" placeholder="Email" autocomplete="email">
-      <input id="regPassword" type="password" placeholder="Password (min 6 chars)" autocomplete="new-password">
-      <button id="registerBtn">Create Account</button>
+    <!-- Register card -->
+    <div class="card" id="registerCard" style="display:none">
+      <h2>CREATE ACCOUNT</h2>
+      <div class="error-msg" id="authErrorReg"></div>
+      <div class="field-group"><label>Your Name</label><input type="text" id="regName" placeholder="Display name" maxlength="20" autocomplete="name"></div>
+      <div class="field-group"><label>Email</label><input type="email" id="regEmail" placeholder="you@example.com" autocomplete="email"></div>
+      <div class="field-group"><label>Password</label><input type="password" id="regPassword" placeholder="Min 6 characters" autocomplete="new-password"></div>
+      <button class="btn btn-primary" id="registerBtn">Create Account</button>
+      <div style="text-align:center;font-size:13px;color:rgba(255,255,255,.4)">
+        Already have one? <button class="link-btn" onclick="showAuthCard('loginCard')">Sign in</button>
+      </div>
     </div>
-
-    <div id="authError" class="error"></div>
   </div>
 </div>
 
 <!-- PASSWORD RESET MODAL -->
 <div class="modal-overlay" id="resetOverlay">
   <div class="modal" onclick="event.stopPropagation()">
-    <h2 id="resetStepTitle">Reset Password</h2>
+    <h2>RESET PASSWORD</h2>
     <div id="resetStep1">
-      <input id="resetEmail" type="email" placeholder="Your email">
-      <button id="resetSendOtp">Send Code</button>
+      <p style="font-size:13px;color:rgba(255,255,255,.4);text-align:center;margin-bottom:16px">Enter your email and we'll send a 6-digit code.</p>
+      <div class="field-group"><label>Email</label><input type="email" id="resetEmail" placeholder="you@example.com"></div>
+      <button class="btn btn-primary" id="resetSendOtp">Send Reset Code</button>
     </div>
-    <div id="resetStep2" style="display:none;">
-      <input id="resetOtp" type="text" placeholder="6-digit code" maxlength="6">
-      <button id="resetVerifyOtp">Verify Code</button>
+    <div id="resetStep2" style="display:none">
+      <p style="font-size:13px;color:rgba(255,255,255,.4);text-align:center;margin-bottom:16px">Enter the 6-digit code we sent you.</p>
+      <div class="field-group"><label>6-Digit Code</label><input type="text" id="resetOtp" class="code-input" placeholder="000000" maxlength="6" inputmode="numeric"></div>
+      <button class="btn btn-primary" id="resetVerifyOtp">Verify Code</button>
     </div>
-    <div id="resetStep3" style="display:none;">
-      <input id="resetNewPassword" type="password" placeholder="New password (min 6 chars)">
-      <button id="resetComplete">Set New Password</button>
+    <div id="resetStep3" style="display:none">
+      <div class="field-group"><label>New Password</label><input type="password" id="resetNewPassword" placeholder="Min 6 characters"></div>
+      <button class="btn btn-primary" id="resetComplete">Set New Password</button>
     </div>
-    <div id="resetError" class="error"></div>
-    <button class="secondary" id="resetCancel">Cancel</button>
+    <div class="error-msg" id="resetError" style="margin-top:8px"></div>
+    <button class="btn btn-secondary" id="resetCancel" style="margin-top:4px">Cancel</button>
   </div>
 </div>
 
-<!-- DASHBOARD SCREEN -->
+<!-- ═══ DASHBOARD ═══ -->
 <div id="dashboard" class="screen">
-  <h1>🀄 Mahjong Dashboard</h1>
-  <div class="card">
-    <h2>Welcome, <span id="dashName"></span></h2>
-    <button id="createRoomBtn">Create New Room</button>
-    <input id="joinRoomCode" type="text" placeholder="Room code" style="text-transform:uppercase;">
-    <button id="joinRoomBtn" class="secondary">Join Room</button>
-  </div>
-  <div class="card">
-    <div id="toggleContainer">
-      <input type="checkbox" id="pushToggle">
-      <label for="pushToggle">Enable push notifications</label>
+  <div class="dashboard-header">
+    <div class="dh-logo">MAHJONG</div>
+    <div class="user-chip">
+      <div class="avatar" id="userAvatar">?</div>
+      <span class="user-name-display" id="dashName"></span>
+      <button class="btn btn-secondary btn-sm" id="logoutBtn">Sign Out</button>
     </div>
   </div>
-  <button class="secondary" id="logoutBtn">Log Out</button>
+  <div class="dashboard-body">
+
+    <div class="section-title">NEW GAME</div>
+    <div class="dash-card">
+      <div style="font-family:'Cinzel',serif;font-size:10px;letter-spacing:2px;color:rgba(255,255,255,.4);text-transform:uppercase;margin-bottom:10px">AI Opponents</div>
+      <div class="ai-slots" id="dashAiSlots"></div>
+      <button class="add-ai-btn" id="dashAddAiBtn">+ Add AI Player</button>
+      <button class="btn btn-primary" id="createRoomBtn">Create Game</button>
+    </div>
+
+    <div class="section-title">JOIN A GAME</div>
+    <div class="dash-card">
+      <div class="field-group">
+        <label>Room Code</label>
+        <input type="text" id="joinRoomCode" class="code-input" placeholder="XXXXX" maxlength="5" autocomplete="off">
+      </div>
+      <button class="btn btn-secondary" id="joinRoomBtn">Join Game</button>
+    </div>
+
+    <div class="section-title">NOTIFICATIONS</div>
+    <div class="dash-card">
+      <div class="notif-row">
+        <div class="notif-label">Push notifications</div>
+        <label class="toggle" id="toggleContainer">
+          <input type="checkbox" id="pushToggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+
+  </div>
 </div>
 
-<!-- WAITING ROOM SCREEN -->
+<!-- ═══ WAITING ROOM ═══ -->
 <div id="waiting" class="screen">
-  <h1>Waiting for Players</h1>
-  <div class="card">
-    <p>Room code: <strong id="waitingRoomCode"></strong></p>
-    <div class="players-row" id="waitingPlayers"></div>
-    <p id="waitingStatus">Waiting for 4 players to join…</p>
-  </div>
-  <div class="card" id="aiControls" style="display:none;">
-    <h2>Add AI Players</h2>
-    <div style="display:flex; gap:0.5rem; margin-bottom:0.6rem; flex-wrap:wrap;">
-      <button class="secondary ai-skill-btn" data-skill="rookie"  style="flex:1">🤖 Rookie</button>
-      <button class="secondary ai-skill-btn" data-skill="veteran" style="flex:1">🤖 Veteran</button>
-      <button class="secondary ai-skill-btn" data-skill="master"  style="flex:1">🤖 Master</button>
+  <div class="centered">
+    <div class="card">
+      <h2>WAITING FOR PLAYERS</h2>
+      <div class="room-code-display" id="roomCodeDisplay">
+        <div class="code" id="waitingRoomCode"></div>
+        <div class="code-label">TAP TO COPY · SHARE THIS CODE</div>
+      </div>
+      <div class="player-list" id="waitingPlayers"></div>
+      <p class="waiting-hint" id="waitingStatus"></p>
+      <button class="btn btn-primary" id="startGameBtn" style="display:none">Start Game</button>
+      <button class="btn btn-secondary" id="leaveWaitingBtn">Leave Room</button>
     </div>
-    <button class="secondary" id="removeAiBtn" style="display:none;">Remove Last AI</button>
-    <button id="startGameBtn" style="display:none; margin-top:0.5rem;">Start Game Now</button>
   </div>
-  <button class="secondary" id="leaveWaitingBtn">Leave Room</button>
 </div>
 
-<!-- GAME SCREEN -->
+<!-- ═══ GAME SCREEN ═══ -->
 <div id="game" class="screen">
-  <div class="card" id="roundBanner" style="text-align:center; padding:0.5rem;"></div>
-  <div class="players-row" id="gamePlayers"></div>
-
-  <div class="discard-area card">
-    <div id="currentDiscardLabel">No discard yet</div>
-    <div class="discard-tile" id="currentDiscardTile"></div>
+  <div class="game-header" id="gameHeader">
+    <button class="menu-btn" id="gameMenuBtn">☰</button>
+    <div class="round-info" id="roundBanner"></div>
+    <span class="turn-badge" id="turnBadge">–</span>
   </div>
-
-  <div class="card">
-    <h2>Exposed Sets</h2>
-    <div id="allExposedSets"></div>
+  <div class="scores-bar" id="gamePlayers"></div>
+  <div class="ai-thinking" id="aiThinking" style="display:none">
+    <div class="ai-dots"><span></span><span></span><span></span></div>
+    <span id="aiThinkingText">AI is thinking…</span>
   </div>
-
-  <div class="card">
-    <h2>Your Hand <span class="hand-hint">(drag tiles to rearrange)</span></h2>
-    <div class="rack">
-      <div class="hand-row" id="handRow"></div>
+  <div class="game-body">
+    <div class="game-section discard-area">
+      <div class="game-section-title">DISCARD</div>
+      <div id="currentDiscardLabel" style="font-size:11px;color:rgba(255,255,255,.5);letter-spacing:1px;margin-bottom:4px"></div>
+      <div class="discard-tile" id="currentDiscardTile"></div>
+    </div>
+    <div class="game-section">
+      <div class="game-section-title">EXPOSED SETS</div>
+      <div id="allExposedSets"></div>
+    </div>
+    <div class="game-section">
+      <div class="game-section-title">YOUR HAND <span class="hand-hint">· drag to rearrange</span></div>
+      <div class="rack">
+        <div class="hand-row" id="handRow"></div>
+      </div>
     </div>
   </div>
 
   <div class="action-bar" id="actionBar"></div>
 </div>
 
+<!-- Toast notification -->
+<div class="toast" id="toast"></div>
+
 <script>
+
   const state = {
     playerId: localStorage.getItem('mj_playerId') || crypto.randomUUID(),
     user: null,
@@ -295,14 +347,7 @@
   }
 
   // ---------- Auth ----------
-  document.getElementById('tabLogin').addEventListener('click', () => {
-    document.getElementById('loginForm').style.display = 'block';
-    document.getElementById('registerForm').style.display = 'none';
-  });
-  document.getElementById('tabRegister').addEventListener('click', () => {
-    document.getElementById('loginForm').style.display = 'none';
-    document.getElementById('registerForm').style.display = 'block';
-  });
+  // Auth card switching handled by showAuthCard()
 
   async function apiCall(url, options = {}) {
     const res = await fetch(url, {
@@ -318,7 +363,7 @@
   document.getElementById('loginBtn').addEventListener('click', async () => {
     setButtonsEnabled(false);
     const errEl = document.getElementById('authError');
-    errEl.textContent = '';
+    errEl.style.display = 'none';
     try {
       const email = document.getElementById('loginEmail').value.trim();
       const password = document.getElementById('loginPassword').value;
@@ -327,24 +372,7 @@
       enterDashboard();
     } catch (err) {
       errEl.textContent = err.message;
-    } finally {
-      setButtonsEnabled(true);
-    }
-  });
-
-  document.getElementById('registerBtn').addEventListener('click', async () => {
-    setButtonsEnabled(false);
-    const errEl = document.getElementById('authError');
-    errEl.textContent = '';
-    try {
-      const name = document.getElementById('regName').value.trim();
-      const email = document.getElementById('regEmail').value.trim();
-      const password = document.getElementById('regPassword').value;
-      const user = await apiCall('/api/register', { method: 'POST', body: JSON.stringify({ name, email, password }) });
-      state.user = user;
-      enterDashboard();
-    } catch (err) {
-      errEl.textContent = err.message;
+      errEl.style.display = 'block';
     } finally {
       setButtonsEnabled(true);
     }
@@ -403,6 +431,9 @@
 
   async function enterDashboard() {
     document.getElementById('dashName').textContent = state.user.name;
+    document.getElementById('userAvatar').textContent = (state.user.name || '?')[0].toUpperCase();
+    state.pendingAiSlots = state.pendingAiSlots || [];
+    renderDashAiSlots();
     showScreen('dashboard');
     setButtonsEnabled(true);
     initPushToggle();
@@ -555,45 +586,43 @@
   function enterWaitingRoom() {
     document.getElementById('waitingRoomCode').textContent = state.roomCode;
     showScreen('waiting');
-    // Show AI controls only to the room host
-    const aiControls = document.getElementById('aiControls');
-    aiControls.style.display = state.isHost ? '' : 'none';
-
-    document.querySelectorAll('.ai-skill-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const skill = btn.dataset.skill;
-        wsSend({ type: 'add_ai', roomCode: state.roomCode, skill });
-      });
-    });
-    document.getElementById('removeAiBtn').addEventListener('click', () => {
-      wsSend({ type: 'remove_ai', roomCode: state.roomCode });
-    });
-    document.getElementById('startGameBtn').addEventListener('click', () => {
-      wsSend({ type: 'start_game', roomCode: state.roomCode });
-    });
+    // Start Game button only shown to host
+    const startBtn = document.getElementById('startGameBtn');
+    if (startBtn._listener) startBtn.removeEventListener('click', startBtn._listener);
+    startBtn._listener = () => wsSend({ type: 'start_game', roomCode: state.roomCode });
+    startBtn.addEventListener('click', startBtn._listener);
   }
 
   function renderWaiting() {
     const container = document.getElementById('waitingPlayers');
     container.innerHTML = '';
+    const SEAT_COLORS = { E: '#c9a227', S: '#4eb8c8', W: '#c94040', N: '#7ec864' };
     for (const p of state.roomState.players) {
-      const chip = document.createElement('div');
-      chip.className = 'player-chip';
-      chip.textContent = `${p.isAI ? '🤖 ' : ''}${p.displayName} (${p.seat})`;
-      container.appendChild(chip);
+      const item = document.createElement('div');
+      item.className = 'player-item';
+      const dot = document.createElement('div');
+      dot.className = 'player-dot';
+      dot.style.background = SEAT_COLORS[p.seat] || '#888';
+      item.appendChild(dot);
+      const nameSpan = document.createElement('span');
+      nameSpan.textContent = p.displayName;
+      item.appendChild(nameSpan);
+      if (p.isAI) {
+        const badge = document.createElement('span');
+        badge.className = `ai-badge ${p.aiSkill}-badge`;
+        badge.textContent = p.aiSkill?.toUpperCase() ?? 'AI';
+        item.appendChild(badge);
+      }
+      container.appendChild(item);
     }
     const total = state.roomState.players.length;
     const aiCount = state.roomState.players.filter(p => p.isAI).length;
     document.getElementById('waitingStatus').textContent =
-      `${total}/4 players joined${aiCount > 0 ? ` (${aiCount} AI)` : ''}…`;
-
-    if (state.isHost) {
-      const full = total >= 4;
-      document.querySelectorAll('.ai-skill-btn').forEach(b => b.disabled = full);
-      document.getElementById('removeAiBtn').style.display = aiCount > 0 ? '' : 'none';
-      document.getElementById('startGameBtn').style.display = full ? 'none' : (total >= 2 && aiCount > 0 ? '' : 'none');
-      // If exactly 4, start button not needed (auto-start fires)
-    }
+      `${total}/4 players${aiCount > 0 ? ` · ${aiCount} AI` : ''} · Waiting…`;
+    const startBtn = document.getElementById('startGameBtn');
+    // Host can manually start if there are AI filling the remaining slots
+    const canStart = state.isHost && total >= 2 && total < 4;
+    startBtn.style.display = canStart ? '' : 'none';
   }
 
   // ---------- Game rendering ----------
@@ -601,21 +630,33 @@
     showScreen('game');
     const room = state.roomState;
 
-    // round/dealer banner
+    // Round/dealer banner (game-header style)
     const roundNames = { EW: 'East', SW: 'South', WW: 'West', NW: 'North' };
     const banner = document.getElementById('roundBanner');
     const dealer = room.players.find(p => p.seat === room.round?.dealerSeat);
-    banner.textContent = `${roundNames[room.roundWind] || room.roundWind} Round · Hand ${room.round?.handNumber ?? 1} · Dealer: ${dealer?.displayName ?? room.round?.dealerSeat ?? '?'}`;
+    banner.textContent = `${roundNames[room.roundWind] || room.roundWind} Round · Hand ${room.round?.handNumber ?? 1}`;
 
-    // players row
+    // Turn badge
+    const turnPlayer = room.players.find(p => p.seat === room.turnSeat);
+    document.getElementById('turnBadge').textContent =
+      turnPlayer ? `${turnPlayer.isAI ? '🤖 ' : ''}${turnPlayer.displayName}` : '–';
+
+    // AI thinking indicator
+    const aiThinking = document.getElementById('aiThinking');
+    const currentIsAI = turnPlayer?.isAI && room.phase === 'playing';
+    aiThinking.style.display = currentIsAI ? '' : 'none';
+    if (currentIsAI) document.getElementById('aiThinkingText').textContent = `${turnPlayer.displayName} is thinking…`;
+
+    // Scores bar (score-chip per player)
     const playersRow = document.getElementById('gamePlayers');
     playersRow.innerHTML = '';
     for (const p of room.players) {
       const chip = document.createElement('div');
-      chip.className = 'player-chip' + (p.seat === room.turnSeat ? ' turn' : '');
+      chip.className = 'score-chip' + (p.seat === room.turnSeat ? ' active-turn' : '');
       const windLabel = { EW: 'E', SW: 'S', WW: 'W', NW: 'N' }[p.seatWind] || '';
-      const aiTag = p.isAI ? `🤖` : '';
-      chip.textContent = `${aiTag}${p.displayName} (${windLabel}) · ${p.handCount} tiles · ${p.score ?? 0}pts`;
+      chip.innerHTML = `<div class="sc-name">${p.isAI ? '🤖' : ''}${p.displayName} (${windLabel})</div>
+        <div class="sc-pts">${p.score ?? 0}</div>
+        ${p.isAI ? `<div class="sc-ai-tag">${(p.aiSkill || 'AI').toUpperCase()}</div>` : `<div class="sc-ai-tag">${p.handCount} tiles</div>`}`;
       playersRow.appendChild(chip);
     }
 
@@ -1035,6 +1076,109 @@
       showScreen('auth');
     }
   })();
+
+
+  // Game menu button → back to dashboard
+  document.getElementById('gameMenuBtn').addEventListener('click', () => {
+    if (confirm('Leave the game and return to dashboard?')) returnToDashboard();
+  });
+  function showAuthCard(id) {
+    document.getElementById('loginCard').style.display = 'none';
+    document.getElementById('registerCard').style.display = 'none';
+    document.getElementById(id).style.display = 'block';
+  }
+
+  // ── Toast helper ──────────────────────────────────────────────────────────
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.style.opacity = '1';
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => { t.style.opacity = '0'; }, 2200);
+  }
+
+  // ── Dashboard AI slot management ──────────────────────────────────────────
+  // AI config lives here before the room is created (matches Colmedorno's UX)
+  state.pendingAiSlots = []; // [{skill:'rookie'|'veteran'|'master'}]
+
+  function renderDashAiSlots() {
+    const container = document.getElementById('dashAiSlots');
+    const addBtn = document.getElementById('dashAddAiBtn');
+    container.innerHTML = '';
+    state.pendingAiSlots.forEach((slot, i) => {
+      const div = document.createElement('div');
+      div.className = 'ai-slot';
+      div.innerHTML = `<span class="ai-slot-label">🤖 AI Player \${i + 1}</span>
+        <div class="ai-difficulty-btns">
+          <button class="diff-btn \${slot.skill==='rookie' ? 'sel-rookie' : ''}" data-i="\${i}" data-skill="rookie">Rookie</button>
+          <button class="diff-btn \${slot.skill==='veteran' ? 'sel-veteran' : ''}" data-i="\${i}" data-skill="veteran">Veteran</button>
+          <button class="diff-btn \${slot.skill==='master' ? 'sel-master' : ''}" data-i="\${i}" data-skill="master">Master</button>
+        </div>
+        <button class="remove-ai-slot" data-i="\${i}" title="Remove">✕</button>`;
+      container.appendChild(div);
+    });
+    container.querySelectorAll('.diff-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.pendingAiSlots[+btn.dataset.i].skill = btn.dataset.skill;
+        renderDashAiSlots();
+      });
+    });
+    container.querySelectorAll('.remove-ai-slot').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.pendingAiSlots.splice(+btn.dataset.i, 1);
+        renderDashAiSlots();
+      });
+    });
+    addBtn.disabled = state.pendingAiSlots.length >= 3;
+  }
+
+  document.getElementById('dashAddAiBtn').addEventListener('click', () => {
+    if (state.pendingAiSlots.length < 3) {
+      state.pendingAiSlots.push({ skill: 'rookie' });
+      renderDashAiSlots();
+    }
+  });
+
+  // Override createRoomBtn to include AI config
+  document.getElementById('createRoomBtn').addEventListener('click', () => {
+    if (!state.ws) connectWS();
+    setTimeout(() => wsSend({
+      type: 'create_room',
+      playerId: state.playerId,
+      userId: state.user?.id,
+      displayName: state.user?.name,
+      aiPlayers: state.pendingAiSlots,
+    }), 150);
+  });
+
+  // Room code tap-to-copy
+  document.getElementById('roomCodeDisplay').addEventListener('click', () => {
+    const code = document.getElementById('waitingRoomCode').textContent;
+    if (code) {
+      navigator.clipboard?.writeText(code).then(() => showToast('Code copied!'));
+    }
+  });
+
+  // Fix register error element (new ID in redesigned HTML)
+  document.getElementById('registerBtn').addEventListener('click', async () => {
+    setButtonsEnabled(false);
+    const errEl = document.getElementById('authErrorReg');
+    errEl.style.display = 'none';
+    try {
+      const name = document.getElementById('regName').value.trim();
+      const email = document.getElementById('regEmail').value.trim();
+      const password = document.getElementById('regPassword').value;
+      const user = await apiCall('/api/register', { method: 'POST', body: JSON.stringify({ name, email, password }) });
+      state.user = user;
+      enterDashboard();
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.style.display = 'block';
+    } finally {
+      setButtonsEnabled(true);
+    }
+  });
+
 </script>
 </body>
 </html>
