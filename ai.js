@@ -15,11 +15,12 @@ export function aiThinkTime(skill) {
   return min + Math.random() * (max - min);
 }
 
-// AI display names per skill
+// AI display names — indexed by slot position (0=Red Dragon, 1=Green Dragon, 2=White Dragon)
+// then by skill level
 export const AI_NAMES = {
-  rookie:  ['Mei (Rookie)', 'Bo (Rookie)', 'Hui (Rookie)'],
-  veteran: ['Chen (Veteran)', 'Lin (Veteran)', 'Wei (Veteran)'],
-  master:  ['Dragon Master', 'Jade Scholar', 'Iron Bamboo'],
+  rookie:  ['Long Xiao',    'Fa Mei',     'Bai Yue'   ], // young/novice: small dragon, new fortune, white moon
+  veteran: ['Long Wei',     'Fa Shen',    'Bai He'    ], // adept: dragon power, fortune spirit, white crane
+  master:  ['Crimson Lord', 'Jade Dragon','Pearl Dragon'], // master tier
 };
 
 export function aiDisplayName(skill, index = 0) {

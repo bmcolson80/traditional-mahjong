@@ -9,12 +9,12 @@
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Lato:wght@300;400;700&family=Noto+Serif+SC:wght@500;700;900&display=swap" rel="stylesheet">
 <style>
 /* ── Design system (matches Colmedorno) ─────────────────────────────────── */
-:root{--navy:#1a1f3a;--navy-light:#252c50;--navy-mid:#2e3760;--gold:#c9a227;--gold-light:#e8c547;--cream:#f5ecd7;--cream-dark:#e8d8b8;--shadow:rgba(0,0,0,0.4);--radius:12px;--radius-sm:6px;--tile-bg:#fdf6e3;}
+:root{--navy:#0d2b1e;--navy-light:#163d2b;--navy-mid:#1e5038;--gold:#c9a227;--gold-light:#e8c547;--cream:#f5ecd7;--cream-dark:#e8d8b8;--shadow:rgba(0,0,0,0.4);--radius:12px;--radius-sm:6px;--tile-bg:#fdf6e3;}
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 body{background:var(--navy);color:var(--cream);font-family:'Lato',sans-serif;min-height:100vh;overflow-x:hidden}
 .screen{display:none;min-height:100vh}
 .screen.active{display:block}
-.centered{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:24px;background:radial-gradient(ellipse at 50% 0%,#2e3760 0%,var(--navy) 70%)}
+.centered{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:24px;background:radial-gradient(ellipse at 50% 0%,#1e5038 0%,var(--navy) 70%)}
 
 /* ── Logo ───────────────────────────────────────────────────────────────── */
 .logo-area{text-align:center;margin-bottom:28px}
@@ -62,9 +62,11 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
 .ai-slot-label{font-size:13px;flex:1;color:var(--cream-dark)}
 .ai-difficulty-btns{display:flex;gap:4px}
 .diff-btn{padding:5px 9px;border-radius:4px;border:1px solid rgba(255,255,255,.15);background:transparent;color:rgba(255,255,255,.5);font-size:10px;letter-spacing:1px;cursor:pointer;font-family:'Lato',sans-serif;transition:all .2s}
-.diff-btn.sel-rookie{background:rgba(78,184,200,.2);border-color:#4eb8c8;color:#4eb8c8}
-.diff-btn.sel-veteran{background:rgba(212,160,23,.2);border-color:var(--gold);color:var(--gold)}
-.diff-btn.sel-master{background:rgba(201,64,64,.2);border-color:#c94040;color:#e08080}
+.diff-btn.sel-rookie{background:rgba(240,230,210,.1);border-color:var(--cream-dark);color:var(--cream)}
+.diff-btn.sel-veteran{background:rgba(46,140,80,.25);border-color:#5eb87a;color:#8ed4a2}
+.diff-btn.sel-master{background:rgba(180,40,40,.25);border-color:#c94040;color:#e08080}
+.ai-slot-icon{width:32px;height:44px;flex-shrink:0;border-radius:4px;overflow:hidden;background:var(--tile-bg);box-shadow:0 2px 6px rgba(0,0,0,.4)}
+.ai-slot-icon svg{width:100%;height:100%}
 .remove-ai-slot{background:none;border:none;color:rgba(255,255,255,.3);cursor:pointer;font-size:16px;padding:0 2px;line-height:1}
 .add-ai-btn{width:100%;padding:10px;border-radius:var(--radius-sm);border:1px dashed rgba(201,162,39,.3);background:transparent;color:rgba(201,162,39,.6);font-family:'Cinzel',serif;font-size:11px;letter-spacing:2px;cursor:pointer;transition:all .2s;margin-bottom:14px}
 .add-ai-btn:hover{border-color:var(--gold);color:var(--gold)}
@@ -558,11 +560,7 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
   }
 
   // ---------- Dashboard actions ----------
-  document.getElementById('createRoomBtn').addEventListener('click', () => {
-    if (!state.ws) connectWS();
-    setTimeout(() => wsSend({ type: 'create_room', playerId: state.playerId, userId: state.user.id, displayName: state.user.name }), 150);
-  });
-
+  // createRoomBtn handled below with AI config included
   document.getElementById('joinRoomBtn').addEventListener('click', () => {
     const code = document.getElementById('joinRoomCode').value.trim().toUpperCase();
     if (!code) return;
@@ -1098,57 +1096,95 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
   }
 
   // ── Dashboard AI slot management ──────────────────────────────────────────
-  // AI config lives here before the room is created (matches Colmedorno's UX)
   state.pendingAiSlots = []; // [{skill:'rookie'|'veteran'|'master'}]
+
+  const SLOT_DRAGONS = [
+    { tile: 'RD', label: 'Red Dragon'   },
+    { tile: 'GD', label: 'Green Dragon' },
+    { tile: 'WD', label: 'White Dragon' },
+  ];
 
   function renderDashAiSlots() {
     const container = document.getElementById('dashAiSlots');
-    const addBtn = document.getElementById('dashAddAiBtn');
+    const addBtn    = document.getElementById('dashAddAiBtn');
     container.innerHTML = '';
-    state.pendingAiSlots.forEach((slot, i) => {
-      const div = document.createElement('div');
-      div.className = 'ai-slot';
-      div.innerHTML = `<span class="ai-slot-label">🤖 AI Player \${i + 1}</span>
-        <div class="ai-difficulty-btns">
-          <button class="diff-btn \${slot.skill==='rookie' ? 'sel-rookie' : ''}" data-i="\${i}" data-skill="rookie">Rookie</button>
-          <button class="diff-btn \${slot.skill==='veteran' ? 'sel-veteran' : ''}" data-i="\${i}" data-skill="veteran">Veteran</button>
-          <button class="diff-btn \${slot.skill==='master' ? 'sel-master' : ''}" data-i="\${i}" data-skill="master">Master</button>
-        </div>
-        <button class="remove-ai-slot" data-i="\${i}" title="Remove">✕</button>`;
-      container.appendChild(div);
-    });
-    container.querySelectorAll('.diff-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        state.pendingAiSlots[+btn.dataset.i].skill = btn.dataset.skill;
-        renderDashAiSlots();
+
+    state.pendingAiSlots.forEach(function(slot, i) {
+      const dragon = SLOT_DRAGONS[i] || SLOT_DRAGONS[0];
+
+      // Outer slot row
+      const slotDiv = document.createElement('div');
+      slotDiv.className = 'ai-slot';
+
+      // Dragon tile icon
+      const iconDiv = document.createElement('div');
+      iconDiv.className = 'ai-slot-icon';
+      iconDiv.innerHTML = tileSVG(dragon.tile);
+      slotDiv.appendChild(iconDiv);
+
+      // Dragon name label
+      const labelSpan = document.createElement('span');
+      labelSpan.className = 'ai-slot-label';
+      labelSpan.textContent = dragon.label;
+      slotDiv.appendChild(labelSpan);
+
+      // Skill selector buttons
+      const btnsDiv = document.createElement('div');
+      btnsDiv.className = 'ai-difficulty-btns';
+      ['rookie', 'veteran', 'master'].forEach(function(skill) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'diff-btn' + (slot.skill === skill ? ' sel-' + skill : '');
+        btn.textContent = skill.charAt(0).toUpperCase() + skill.slice(1);
+        (function(idx, sk) {
+          btn.addEventListener('click', function() {
+            state.pendingAiSlots[idx].skill = sk;
+            renderDashAiSlots();
+          });
+        })(i, skill);
+        btnsDiv.appendChild(btn);
       });
+      slotDiv.appendChild(btnsDiv);
+
+      // Remove button
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'remove-ai-slot';
+      removeBtn.title = 'Remove';
+      removeBtn.textContent = '✕';
+      (function(idx) {
+        removeBtn.addEventListener('click', function() {
+          state.pendingAiSlots.splice(idx, 1);
+          renderDashAiSlots();
+        });
+      })(i);
+      slotDiv.appendChild(removeBtn);
+
+      container.appendChild(slotDiv);
     });
-    container.querySelectorAll('.remove-ai-slot').forEach(btn => {
-      btn.addEventListener('click', () => {
-        state.pendingAiSlots.splice(+btn.dataset.i, 1);
-        renderDashAiSlots();
-      });
-    });
+
     addBtn.disabled = state.pendingAiSlots.length >= 3;
   }
 
-  document.getElementById('dashAddAiBtn').addEventListener('click', () => {
+  document.getElementById('dashAddAiBtn').addEventListener('click', function() {
     if (state.pendingAiSlots.length < 3) {
       state.pendingAiSlots.push({ skill: 'rookie' });
       renderDashAiSlots();
     }
   });
 
-  // Override createRoomBtn to include AI config
-  document.getElementById('createRoomBtn').addEventListener('click', () => {
+  // createRoomBtn — include AI config
+  document.getElementById('createRoomBtn').addEventListener('click', function() {
     if (!state.ws) connectWS();
-    setTimeout(() => wsSend({
-      type: 'create_room',
-      playerId: state.playerId,
-      userId: state.user?.id,
-      displayName: state.user?.name,
-      aiPlayers: state.pendingAiSlots,
-    }), 150);
+    setTimeout(function() {
+      wsSend({
+        type: 'create_room',
+        playerId: state.playerId,
+        userId: state.user && state.user.id,
+        displayName: state.user && state.user.name,
+        aiPlayers: state.pendingAiSlots,
+      });
+    }, 150);
   });
 
   // Room code tap-to-copy
