@@ -8,6 +8,7 @@ import webpush from 'web-push';
 import { Resend } from 'resend';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { randomUUID } from 'crypto';
 
 import { initDB, all, get, run } from './db.js';
 import * as G from './game.js';
@@ -493,7 +494,7 @@ function handleMessage(ws, msg) {
   switch (msg.type) {
     case 'create_room': {
       const roomCode = genRoomCode();
-      const playerId = msg.playerId ?? crypto.randomUUID();
+      const playerId = msg.playerId ?? randomUUID();
       const room = G.createRoom(roomCode, playerId);
       G.addPlayer(room, { playerId, userId: msg.userId, displayName: msg.displayName ?? 'Player' });
       // Pre-configured AI players added from the dashboard
@@ -501,7 +502,7 @@ function handleMessage(ws, msg) {
       for (const cfg of aiConfigs) {
         const skill = ['rookie','veteran','master'].includes(cfg.skill) ? cfg.skill : 'rookie';
         const aiCount = room.players.filter(p => p.isAI && p.aiSkill === skill).length;
-        const aiPlayerId = `ai-${crypto.randomUUID()}`;
+        const aiPlayerId = `ai-${randomUUID()}`;
         G.addPlayer(room, { playerId: aiPlayerId, userId: null, displayName: AI.aiDisplayName(skill, aiCount) });
         const aiPlayer = room.players.find(p => p.playerId === aiPlayerId);
         aiPlayer.isAI = true;
@@ -529,7 +530,7 @@ function handleMessage(ws, msg) {
       if (room.players.length >= 4) return send(ws, { type: 'error', message: 'Room is full' });
       const skill = ['rookie', 'veteran', 'master'].includes(msg.skill) ? msg.skill : 'rookie';
       const aiCount = room.players.filter(p => p.isAI && p.aiSkill === skill).length;
-      const aiPlayerId = `ai-${crypto.randomUUID()}`;
+      const aiPlayerId = `ai-${randomUUID()}`;
       G.addPlayer(room, { playerId: aiPlayerId, userId: null, displayName: AI.aiDisplayName(skill, aiCount) });
       const aiPlayer = room.players.find(p => p.playerId === aiPlayerId);
       aiPlayer.isAI = true;
@@ -576,7 +577,7 @@ function handleMessage(ws, msg) {
       const room = rooms.get(msg.roomCode);
       if (!room) return send(ws, { type: 'error', message: 'Room not found' });
       if (room.phase !== 'waiting') return send(ws, { type: 'error', message: 'Game already in progress' });
-      const playerId = msg.playerId ?? crypto.randomUUID();
+      const playerId = msg.playerId ?? randomUUID();
       const seat = G.addPlayer(room, { playerId, userId: msg.userId, displayName: msg.displayName ?? 'Player' });
       clients.set(ws, { roomCode: room.code, playerId, userId: msg.userId, displayName: msg.displayName });
       persistRoom(room);
