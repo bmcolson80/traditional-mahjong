@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test test/game.test.js",
-    "test:all": "node --test test/game.test.js test/e2e.test.js test/regression.test.js"
+    "test:all": "node --test test/game.test.js test/e2e.test.js test/regression.test.js test/ai.test.js"
   },
   "dependencies": {
     "express": "^4.19.2",

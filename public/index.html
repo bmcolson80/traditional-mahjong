@@ -231,6 +231,16 @@
     <div class="players-row" id="waitingPlayers"></div>
     <p id="waitingStatus">Waiting for 4 players to join…</p>
   </div>
+  <div class="card" id="aiControls" style="display:none;">
+    <h2>Add AI Players</h2>
+    <div style="display:flex; gap:0.5rem; margin-bottom:0.6rem; flex-wrap:wrap;">
+      <button class="secondary ai-skill-btn" data-skill="rookie"  style="flex:1">🤖 Rookie</button>
+      <button class="secondary ai-skill-btn" data-skill="veteran" style="flex:1">🤖 Veteran</button>
+      <button class="secondary ai-skill-btn" data-skill="master"  style="flex:1">🤖 Master</button>
+    </div>
+    <button class="secondary" id="removeAiBtn" style="display:none;">Remove Last AI</button>
+    <button id="startGameBtn" style="display:none; margin-top:0.5rem;">Start Game Now</button>
+  </div>
   <button class="secondary" id="leaveWaitingBtn">Leave Room</button>
 </div>
 
@@ -268,6 +278,7 @@
     mySeat: null,
     roomState: null,
     selectedTile: null,
+    isHost: false,
     handOrder: [],        // client-side tile order for drag-to-rearrange, reconciled against server hand
     dealtHandKey: null,   // identifies the current hand, used to trigger the deal-in animation once per hand
     lastDiscardKey: null, // identifies the current discard, used to trigger the toss-in animation once per discard
@@ -476,11 +487,13 @@
     switch (msg.type) {
       case 'room_created':
         state.roomCode = msg.roomCode;
+        state.isHost = true;
         enterWaitingRoom();
         break;
       case 'room_joined':
         state.roomCode = msg.roomCode;
         state.mySeat = msg.seat;
+        state.isHost = false;
         enterWaitingRoom();
         break;
       case 'room_state':
@@ -542,6 +555,22 @@
   function enterWaitingRoom() {
     document.getElementById('waitingRoomCode').textContent = state.roomCode;
     showScreen('waiting');
+    // Show AI controls only to the room host
+    const aiControls = document.getElementById('aiControls');
+    aiControls.style.display = state.isHost ? '' : 'none';
+
+    document.querySelectorAll('.ai-skill-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const skill = btn.dataset.skill;
+        wsSend({ type: 'add_ai', roomCode: state.roomCode, skill });
+      });
+    });
+    document.getElementById('removeAiBtn').addEventListener('click', () => {
+      wsSend({ type: 'remove_ai', roomCode: state.roomCode });
+    });
+    document.getElementById('startGameBtn').addEventListener('click', () => {
+      wsSend({ type: 'start_game', roomCode: state.roomCode });
+    });
   }
 
   function renderWaiting() {
@@ -550,11 +579,21 @@
     for (const p of state.roomState.players) {
       const chip = document.createElement('div');
       chip.className = 'player-chip';
-      chip.textContent = `${p.displayName} (${p.seat})`;
+      chip.textContent = `${p.isAI ? '🤖 ' : ''}${p.displayName} (${p.seat})`;
       container.appendChild(chip);
     }
+    const total = state.roomState.players.length;
+    const aiCount = state.roomState.players.filter(p => p.isAI).length;
     document.getElementById('waitingStatus').textContent =
-      `${state.roomState.players.length}/4 players joined…`;
+      `${total}/4 players joined${aiCount > 0 ? ` (${aiCount} AI)` : ''}…`;
+
+    if (state.isHost) {
+      const full = total >= 4;
+      document.querySelectorAll('.ai-skill-btn').forEach(b => b.disabled = full);
+      document.getElementById('removeAiBtn').style.display = aiCount > 0 ? '' : 'none';
+      document.getElementById('startGameBtn').style.display = full ? 'none' : (total >= 2 && aiCount > 0 ? '' : 'none');
+      // If exactly 4, start button not needed (auto-start fires)
+    }
   }
 
   // ---------- Game rendering ----------
@@ -575,7 +614,8 @@
       const chip = document.createElement('div');
       chip.className = 'player-chip' + (p.seat === room.turnSeat ? ' turn' : '');
       const windLabel = { EW: 'E', SW: 'S', WW: 'W', NW: 'N' }[p.seatWind] || '';
-      chip.textContent = `${p.displayName} (${windLabel}) · ${p.handCount} tiles · ${p.score ?? 0}pts`;
+      const aiTag = p.isAI ? `🤖` : '';
+      chip.textContent = `${aiTag}${p.displayName} (${windLabel}) · ${p.handCount} tiles · ${p.score ?? 0}pts`;
       playersRow.appendChild(chip);
     }
 
@@ -932,8 +972,8 @@
     if (room.phase !== 'playing') return;
 
     if (isMyTurn) {
-      if (me.hand.length % 3 === 2) {
-        // needs to draw
+      if (me.hand.length % 3 === 1) {
+        // 13 tiles (or 10/7 after claims) → needs to draw
         const drawBtn = document.createElement('button');
         drawBtn.textContent = 'Draw Tile';
         drawBtn.addEventListener('click', () => wsSend({ type: 'draw' }));

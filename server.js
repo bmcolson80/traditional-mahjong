@@ -11,6 +11,7 @@ import { fileURLToPath } from 'url';
 
 import { initDB, all, get, run } from './db.js';
 import * as G from './game.js';
+import * as AI from './ai.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -267,6 +268,8 @@ function publicRoomView(room, forSeat) {
       handCount: p.hand.length,
       exposed: p.exposed,
       flowers: p.flowers,
+      isAI: p.isAI ?? false,
+      aiSkill: p.aiSkill ?? null,
       hand: p.seat === forSeat ? p.hand : undefined,
     })),
   };
@@ -324,6 +327,166 @@ wss.on('connection', (ws) => {
   });
 });
 
+// ─── AI scheduling ────────────────────────────────────────────────────────────
+// All AI decisions run server-side via setTimeout. Per GAMESTACK pattern:
+// always check room still exists and phase is still 'playing' before firing.
+
+function clearAiTimeout(room) {
+  if (room._aiTimeout) { clearTimeout(room._aiTimeout); room._aiTimeout = null; }
+}
+
+function scheduleAiTurn(room) {
+  const player = room.players.find(p => p.seat === room.turnSeat && p.isAI);
+  if (!player || room.phase !== 'playing') return;
+  clearAiTimeout(room);
+  room._aiTimeout = setTimeout(() => {
+    room._aiTimeout = null;
+    const current = rooms.get(room.code);
+    if (!current || current.phase !== 'playing') return;
+    const currentPlayer = current.players.find(p => p.seat === current.turnSeat && p.isAI);
+    if (!currentPlayer) return;
+    try { executeAiTurn(current, currentPlayer); }
+    catch (err) { console.error('AI turn error:', err); }
+  }, AI.aiThinkTime(player.aiSkill));
+}
+
+// After any discard, give humans a brief window to claim; then let AI claim.
+function scheduleAiClaims(room) {
+  clearAiTimeout(room);
+  room._aiTimeout = setTimeout(() => {
+    room._aiTimeout = null;
+    const current = rooms.get(room.code);
+    if (!current || !current.currentDiscard || current.phase !== 'playing') return;
+    try { executeAiClaims(current); }
+    catch (err) { console.error('AI claim error:', err); }
+  }, 1600); // 1.6 s human window
+}
+
+function executeAiTurn(room, player) {
+  // hand.length % 3 === 1 → player needs to draw first (13, 10, 7, 4, 1 tiles)
+  // hand.length % 3 === 2 → player has drawn / claimed and needs to discard (14, 11, 8, 5, 2 tiles)
+  if (player.hand.length % 3 === 1) {
+    const tile = G.drawTile(room, player);
+    if (!tile) {
+      G.advanceHand(room, { isDraw: true });
+      room.phase = 'finished';
+      persistRoom(room);
+      broadcastRoomState(room);
+      broadcast(room, { type: 'wall_empty', round: room.round, matchOver: room.round.matchOver });
+      return;
+    }
+    persistRoom(room);
+    broadcastRoomState(room);
+    // Brief extra pause before discarding so the draw registers on screen
+    room._aiTimeout = setTimeout(() => {
+      room._aiTimeout = null;
+      const current = rooms.get(room.code);
+      if (!current || current.phase !== 'playing') return;
+      const p = current.players.find(px => px.playerId === player.playerId);
+      if (!p) return;
+      try { aiDiscard(current, p); }
+      catch (err) { console.error('AI discard error:', err); }
+    }, AI.aiThinkTime(player.aiSkill) * 0.6);
+    return;
+  }
+  aiDiscard(room, player);
+}
+
+function aiDiscard(room, player) {
+  // Check for self-draw win first
+  if (AI.shouldDeclareWin(player.hand, player.exposed, null, player.aiSkill)) {
+    executeAiWin(room, player, true, null, null);
+    return;
+  }
+  const tile = AI.chooseDiscard(player.hand, player.exposed, player.aiSkill);
+  G.discardTile(room, player, tile);
+  room.turnSeat = G.nextSeat(player.seat);
+  persistRoom(room);
+  broadcastRoomState(room);
+  broadcast(room, { type: 'tile_discarded', tile, fromSeat: player.seat });
+  scheduleAiClaims(room);
+}
+
+function executeAiClaims(room) {
+  if (!room.currentDiscard) return;
+  const { tile, fromSeat } = room.currentDiscard;
+
+  // Priority 1: Any AI wins on the discard
+  for (const p of room.players) {
+    if (!p.isAI || p.seat === fromSeat) continue;
+    if (AI.shouldDeclareWin(p.hand, p.exposed, tile, p.aiSkill)) {
+      executeAiWin(room, p, false, tile, fromSeat);
+      return;
+    }
+  }
+
+  // Priority 2: Kong from discard
+  for (const p of room.players) {
+    if (!p.isAI || p.seat === fromSeat) continue;
+    if (G.canKongFromDiscard(p.hand, tile)) {
+      G.applyKong(room, p, tile, fromSeat, false);
+      room.turnSeat = p.seat;
+      persistRoom(room);
+      broadcastRoomState(room);
+      broadcast(room, { type: 'kong_claimed', playerId: p.playerId, tile });
+      scheduleAiTurn(room);
+      return;
+    }
+  }
+
+  // Priority 3: Pung
+  for (const p of room.players) {
+    if (!p.isAI || p.seat === fromSeat) continue;
+    if (G.canPung(p.hand, tile) && AI.shouldClaimPung(p.hand, tile, p.exposed, p.aiSkill)) {
+      G.applyPung(room, p, tile, fromSeat);
+      room.turnSeat = p.seat;
+      persistRoom(room);
+      broadcastRoomState(room);
+      broadcast(room, { type: 'pung_claimed', playerId: p.playerId, tile });
+      scheduleAiTurn(room);
+      return;
+    }
+  }
+
+  // Priority 4: Chow (only the player immediately left of discarder)
+  const chowSeat = G.nextSeat(fromSeat);
+  const chower = room.players.find(p => p.seat === chowSeat && p.isAI);
+  if (chower) {
+    const options = G.canChow(chower.hand, tile, chowSeat, fromSeat);
+    if (options && options.length > 0 && AI.shouldClaimChow(chower.hand, tile, chower.exposed, chower.aiSkill, chowSeat, fromSeat)) {
+      G.applyChow(room, chower, options[0], tile, fromSeat);
+      room.turnSeat = chower.seat;
+      persistRoom(room);
+      broadcastRoomState(room);
+      broadcast(room, { type: 'chow_claimed', playerId: chower.playerId, sequence: options[0] });
+      scheduleAiTurn(room);
+      return;
+    }
+  }
+
+  // No AI claims — schedule whoever's turn it is next
+  scheduleAiTurn(room);
+}
+
+function executeAiWin(room, player, selfDraw, winningTile, discarderSeat) {
+  const wTile   = winningTile ?? player.hand[player.hand.length - 1];
+  const hCheck  = selfDraw ? player.hand.slice(0, -1) : player.hand;
+  const result  = G.checkWin(hCheck, player.exposed, wTile);
+  if (!result.win) return;
+  const roundWind = G.getRoundWind(room);
+  const seatWind  = G.getSeatWind(room, player.seat);
+  const score     = G.scoreHand(player, player.exposed, hCheck, wTile, { selfDraw, roundWind, seatWind });
+  const standings = G.settleScore(room, player.seat, score.fan, { selfDraw, discarderSeat });
+  G.advanceHand(room, { winnerSeat: player.seat });
+  room.phase = 'finished';
+  persistRoom(room);
+  broadcastRoomState(room);
+  broadcast(room, { type: 'game_won', playerId: player.playerId, seat: player.seat, result, score, standings, round: room.round, matchOver: room.round.matchOver });
+  for (const p of room.players) {
+    if (p.userId) notifyUser(p.userId, { title: 'Mahjong!', body: `${player.displayName} won!` });
+  }
+}
+
 function handleMessage(ws, msg) {
   const meta = clients.get(ws);
 
@@ -340,6 +503,57 @@ function handleMessage(ws, msg) {
       broadcastRoomState(room);
       break;
     }
+    case 'add_ai': {
+      const room = rooms.get(msg.roomCode);
+      if (!room) return send(ws, { type: 'error', message: 'Room not found' });
+      if (room.phase !== 'waiting') return send(ws, { type: 'error', message: 'Game already in progress' });
+      if (room.hostPlayerId !== meta.playerId) return send(ws, { type: 'error', message: 'Only the host can add AI players' });
+      if (room.players.length >= 4) return send(ws, { type: 'error', message: 'Room is full' });
+      const skill = ['rookie', 'veteran', 'master'].includes(msg.skill) ? msg.skill : 'rookie';
+      const aiCount = room.players.filter(p => p.isAI && p.aiSkill === skill).length;
+      const aiPlayerId = `ai-${crypto.randomUUID()}`;
+      G.addPlayer(room, { playerId: aiPlayerId, userId: null, displayName: AI.aiDisplayName(skill, aiCount) });
+      const aiPlayer = room.players.find(p => p.playerId === aiPlayerId);
+      aiPlayer.isAI = true;
+      aiPlayer.aiSkill = skill;
+      persistRoom(room);
+      broadcastRoomState(room);
+      if (room.players.length === 4) {
+        G.startGame(room);
+        persistRoom(room);
+        broadcastRoomState(room);
+        broadcast(room, { type: 'game_started', round: room.round });
+        scheduleAiTurn(room);
+      }
+      break;
+    }
+    case 'remove_ai': {
+      const room = rooms.get(msg.roomCode);
+      if (!room) return send(ws, { type: 'error', message: 'Room not found' });
+      if (room.phase !== 'waiting') return send(ws, { type: 'error', message: 'Game already in progress' });
+      if (room.hostPlayerId !== meta.playerId) return send(ws, { type: 'error', message: 'Only the host can remove AI players' });
+      const aiIdx = room.players.map((p, i) => ({ p, i })).reverse().find(({ p }) => p.isAI)?.i;
+      if (aiIdx === undefined) return send(ws, { type: 'error', message: 'No AI players to remove' });
+      room.players.splice(aiIdx, 1);
+      // Reassign seats sequentially
+      const SEATS = ['E', 'S', 'W', 'N'];
+      room.players.forEach((p, i) => { p.seat = SEATS[i]; });
+      persistRoom(room);
+      broadcastRoomState(room);
+      break;
+    }
+    case 'start_game': {
+      const room = rooms.get(msg.roomCode);
+      if (!room) return send(ws, { type: 'error', message: 'Room not found' });
+      if (room.hostPlayerId !== meta.playerId) return send(ws, { type: 'error', message: 'Only the host can start the game' });
+      if (room.players.length !== 4) return send(ws, { type: 'error', message: 'Need exactly 4 players (use Add AI to fill seats)' });
+      G.startGame(room);
+      persistRoom(room);
+      broadcastRoomState(room);
+      broadcast(room, { type: 'game_started', round: room.round });
+      scheduleAiTurn(room);
+      break;
+    }
     case 'join_room': {
       const room = rooms.get(msg.roomCode);
       if (!room) return send(ws, { type: 'error', message: 'Room not found' });
@@ -354,7 +568,8 @@ function handleMessage(ws, msg) {
         G.startGame(room);
         persistRoom(room);
         broadcastRoomState(room);
-        broadcast(room, { type: 'game_started' });
+        broadcast(room, { type: 'game_started', round: room.round });
+        scheduleAiTurn(room);
       }
       break;
     }
@@ -367,12 +582,14 @@ function handleMessage(ws, msg) {
       persistRoom(room);
       broadcastRoomState(room);
       broadcast(room, { type: 'tile_discarded', tile: msg.tile, fromSeat: player.seat });
+      scheduleAiClaims(room);
       break;
     }
     case 'draw': {
       const room = requireRoom(meta);
       const player = requirePlayer(room, meta.playerId);
       if (room.turnSeat !== player.seat) throw new Error('Not your turn');
+      clearAiTimeout(room); // human is taking action, cancel any pending AI
       const tile = G.drawTile(room, player);
       if (!tile) {
         G.advanceHand(room, { isDraw: true });
@@ -388,6 +605,7 @@ function handleMessage(ws, msg) {
     }
     case 'claim_pung': {
       const room = requireRoom(meta);
+      clearAiTimeout(room); // human beat the AI to the claim
       const player = requirePlayer(room, meta.playerId);
       if (!room.currentDiscard) throw new Error('No discard to claim');
       const { tile, fromSeat } = room.currentDiscard;
@@ -401,6 +619,7 @@ function handleMessage(ws, msg) {
     }
     case 'claim_kong': {
       const room = requireRoom(meta);
+      clearAiTimeout(room);
       const player = requirePlayer(room, meta.playerId);
       const concealed = Boolean(msg.concealed);
       let tile = msg.tile;
@@ -420,6 +639,7 @@ function handleMessage(ws, msg) {
     }
     case 'claim_chow': {
       const room = requireRoom(meta);
+      clearAiTimeout(room);
       const player = requirePlayer(room, meta.playerId);
       if (!room.currentDiscard) throw new Error('No discard to claim');
       const { tile, fromSeat } = room.currentDiscard;
@@ -438,6 +658,7 @@ function handleMessage(ws, msg) {
     }
     case 'declare_win': {
       const room = requireRoom(meta);
+      clearAiTimeout(room);
       const player = requirePlayer(room, meta.playerId);
       const selfDraw = !room.currentDiscard || room.currentDiscard.fromSeat === player.seat;
       const winningTile = selfDraw ? player.hand[player.hand.length - 1] : room.currentDiscard.tile;
@@ -473,6 +694,7 @@ function handleMessage(ws, msg) {
       persistRoom(room);
       broadcastRoomState(room);
       broadcast(room, { type: 'game_started', round: room.round });
+      scheduleAiTurn(room);
       break;
     }
     default:
