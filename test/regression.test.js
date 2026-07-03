@@ -347,6 +347,20 @@ describe('regression: advanceHand matchOver flag', () => {
     }
     assert.equal(room.round.matchOver, false, 'matchOver should still be false at 8 hands');
   });
+
+  test('matchOverReason is "cycle" when the match ends via a completed wind cycle', () => {
+    const room = G.createRoom('MATCH3', 'p1');
+    ['p1','p2','p3','p4'].forEach((id,i) => G.addPlayer(room, { playerId: id, displayName: `P${i}` }));
+    assert.equal(room.round.matchOverReason, null, 'no reason before the match ends');
+
+    for (let round = 0; round < 4; round++) {
+      for (let hand = 0; hand < 4; hand++) {
+        const currentDealer = room.round.dealerSeat;
+        G.advanceHand(room, { winnerSeat: G.nextSeat(currentDealer) });
+      }
+    }
+    assert.equal(room.round.matchOverReason, 'cycle');
+  });
 });
 
 describe('regression: getSeatWind correctly rotates with dealer', () => {

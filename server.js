@@ -556,7 +556,11 @@ function executeAiWin(room, player, selfDraw, winningTile, discarderSeat) {
   G.advanceHand(room, { winnerSeat: player.seat });
   room.phase = 'finished';
   // Bankruptcy house rule: the moment any payer's chips hit 0 or below, the match ends instantly.
-  if (settlement.bankruptSeats.length > 0) room.round.matchOver = true;
+  if (settlement.bankruptSeats.length > 0) {
+    room.round.matchOver = true;
+    room.round.matchOverReason = 'bankruptcy';
+    room.round.bankruptSeats = settlement.bankruptSeats;
+  }
   persistRoom(room);
   broadcastRoomState(room);
   broadcast(room, {
@@ -776,7 +780,11 @@ function handleMessage(ws, msg) {
       G.advanceHand(room, { winnerSeat: player.seat });
       room.phase = 'finished';
       // Bankruptcy house rule: the moment any payer's chips hit 0 or below, the match ends instantly.
-      if (settlement.bankruptSeats.length > 0) room.round.matchOver = true;
+      if (settlement.bankruptSeats.length > 0) {
+        room.round.matchOver = true;
+        room.round.matchOverReason = 'bankruptcy';
+        room.round.bankruptSeats = settlement.bankruptSeats;
+      }
       persistRoom(room);
       broadcastRoomState(room);
       broadcast(room, {

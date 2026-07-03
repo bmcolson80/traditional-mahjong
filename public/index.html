@@ -491,7 +491,7 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
         const pip = document.createElement('span');
         pip.className = 'player-pip';
         pip.style.background = p.isAI ? '#666' : (SEAT_COLORS[p.seat] || '#888');
-        pip.title = p.displayName + ' (' + p.seat + ') ' + p.score + 'pts';
+        pip.title = p.displayName + ' (' + p.seat + ') ' + p.score + ' chips';
         pips.appendChild(pip);
       }
       info.appendChild(code);
@@ -735,6 +735,7 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     for (const p of room.players) {
       const chip = document.createElement('div');
       chip.className = 'score-chip' + (p.seat === room.turnSeat ? ' active-turn' : '');
+      chip.title = `${p.displayName}: ${p.score ?? 0} chips`;
       const windLabel = { EW: 'E', SW: 'S', WW: 'W', NW: 'N' }[p.seatWind] || '';
       chip.innerHTML = `<div class="sc-name">${p.isAI ? '🤖' : ''}${p.displayName} (${windLabel})</div>
         <div class="sc-pts">${p.score ?? 0}</div>
@@ -1077,7 +1078,16 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     if (room.phase === 'finished') {
       if (room.round?.matchOver) {
         const doneMsg = document.createElement('div');
-        doneMsg.textContent = 'Match complete — full East→North cycle finished.';
+        if (room.round.matchOverReason === 'bankruptcy') {
+          const names = (room.round.bankruptSeats || [])
+            .map(seat => room.players.find(p => p.seat === seat)?.displayName || seat)
+            .join(', ');
+          doneMsg.textContent = names
+            ? `Match complete — ${names} ran out of chips.`
+            : 'Match complete — a player ran out of chips.';
+        } else {
+          doneMsg.textContent = 'Match complete — full East→North cycle finished.';
+        }
         bar.appendChild(doneMsg);
         const backBtn = document.createElement('button');
         backBtn.textContent = 'Back to Dashboard';

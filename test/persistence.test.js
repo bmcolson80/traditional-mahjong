@@ -225,6 +225,39 @@ describe('rejoin_room — player reconnects', () => {
   });
 });
 
+// ── bankruptcy house rule (server-level) ────────────────────────────────────────
+
+describe('bankruptcy ends the match instantly', () => {
+  test('declare_win sets matchOverReason "bankruptcy" and includes bankruptSeats when a payer runs out of chips', async () => {
+    const { ws, roomCode } = await createRoomWithAI('bankrupt-p0', null, 'Host');
+    const room = rooms.get(roomCode);
+    const east = room.players.find(p => p.seat === 'E'); // host is always dealt seat E as first player
+
+    // Rig a simple concealed self-draw win: 3 chow-able runs + a pair, 14th tile completes it.
+    east.hand = ['1D','2D','3D','4D','5D','6D','7D','8D','9D','1B','2B','3B','9C','9C'];
+    east.exposed = [];
+    room.currentDiscard = null; // ensures declare_win treats this as a self-draw
+
+    // Put an opponent on the brink so any payout bankrupts them, regardless of the exact
+    // dealer-win/streak multiplier math (this test only cares about the end-of-match wiring).
+    const west = room.players.find(p => p.seat === 'W');
+    west.score = 1;
+
+    const wonP = waitMsg(ws, m => m.type === 'game_won');
+    ws.send(JSON.stringify({ type: 'declare_win' }));
+    const won = await wonP;
+
+    assert.ok(won.bankruptSeats.includes('W'), 'West should be reported bankrupt in the broadcast');
+    assert.equal(won.matchOver, true);
+
+    const after = rooms.get(roomCode);
+    assert.equal(after.round.matchOverReason, 'bankruptcy', 'room.round should persist the reason the match ended');
+    assert.ok(after.round.bankruptSeats.includes('W'), 'room.round should persist which seat(s) went bankrupt');
+
+    ws.close();
+  });
+});
+
 // ── /api/my-games ─────────────────────────────────────────────────────────────
 
 describe('/api/my-games', () => {

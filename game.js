@@ -59,7 +59,14 @@ export function createRoom(roomCode, hostPlayerId) {
     // dealerStreak: consecutive hands the current dealer has WON (not draws).
     // Resets to 0 whenever the deal passes to a new dealer. Multiplies chip payouts
     // on dealer wins (see settleScore).
-    round: { windIndex: 0, handNumber: 1, dealerSeat: 'E', matchOver: false, dealerStreak: 0 },
+    // matchOverReason/bankruptSeats: set when matchOver becomes true, so the client
+    // can tell "completed a full East→North cycle" apart from "someone went bankrupt"
+    // even after a page refresh (this is part of persisted room state, unlike the
+    // one-off game_won broadcast).
+    round: {
+      windIndex: 0, handNumber: 1, dealerSeat: 'E', matchOver: false,
+      dealerStreak: 0, matchOverReason: null, bankruptSeats: [],
+    },
     hostPlayerId,
     gameState: {},
     chipsInitialized: false, // set true once starting chips are assigned (first startGame of the match)
@@ -101,7 +108,10 @@ export function advanceHand(room, { winnerSeat, isDraw = false } = {}) {
   if (room.round.handNumber > 4) {
     room.round.handNumber = 1;
     room.round.windIndex = (room.round.windIndex + 1) % 4;
-    if (room.round.windIndex === 0) room.round.matchOver = true; // completed a full East->North cycle
+    if (room.round.windIndex === 0) {
+      room.round.matchOver = true; // completed a full East->North cycle
+      room.round.matchOverReason = 'cycle';
+    }
   }
   return room.round;
 }
