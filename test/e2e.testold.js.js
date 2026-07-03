@@ -71,40 +71,6 @@ describe('WebSocket game flow', () => {
     sockets.forEach(s => s.close());
   });
 
-  test('3 human players can fill the last seat with AI and the game auto-starts', async () => {
-    const sockets = [];
-    for (let i = 0; i < 3; i++) sockets.push(await connect());
-
-    const createPromise = waitForMessage(sockets[0], m => m.type === 'room_created');
-    sockets[0].send(JSON.stringify({ type: 'create_room', playerId: 'fill-p0', displayName: 'Host' }));
-    const created = await createPromise;
-    const roomCode = created.roomCode;
-
-    for (let i = 1; i < 3; i++) {
-      const joinPromise = waitForMessage(sockets[i], m => m.type === 'room_joined');
-      sockets[i].send(JSON.stringify({ type: 'join_room', roomCode, playerId: `fill-p${i}`, displayName: `P${i}` }));
-      await joinPromise;
-    }
-
-    // Room now has 3 humans, 1 empty seat — game must NOT have auto-started yet.
-    let startedTooEarly = false;
-    try {
-      await waitForMessage(sockets[0], m => m.type === 'game_started', 400);
-      startedTooEarly = true;
-    } catch {
-      startedTooEarly = false; // expected — no game_started should arrive with only 3 players
-    }
-    assert.equal(startedTooEarly, false, 'game should not start with only 3 players and no AI');
-
-    // Host fills the last seat with AI — this is exactly what the waiting-room "Add AI" fix enables.
-    const startedPromise = waitForMessage(sockets[0], m => m.type === 'game_started');
-    sockets[0].send(JSON.stringify({ type: 'add_ai', roomCode, skill: 'rookie' }));
-    const started = await startedPromise;
-    assert.ok(started);
-
-    sockets.forEach(s => s.close());
-  });
-
   test('invalid message type returns an error, not a crash', async () => {
     const ws = await connect();
     const errPromise = waitForMessage(ws, m => m.type === 'error');

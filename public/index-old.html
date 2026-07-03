@@ -291,14 +291,6 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
       </div>
       <div class="player-list" id="waitingPlayers"></div>
       <p class="waiting-hint" id="waitingStatus"></p>
-      <div id="waitingAiAddRow" style="display:none">
-        <p class="waiting-hint" style="padding-bottom:4px">Fill an empty seat with AI:</p>
-        <div class="ai-difficulty-btns" id="waitingAiAddBtns">
-          <button type="button" class="diff-btn" data-skill="rookie">Rookie</button>
-          <button type="button" class="diff-btn" data-skill="veteran">Veteran</button>
-          <button type="button" class="diff-btn" data-skill="master">Master</button>
-        </div>
-      </div>
       <button class="btn btn-primary" id="startGameBtn" style="display:none">Start Game</button>
       <button class="btn btn-secondary" id="leaveWaitingBtn">Leave Room</button>
     </div>
@@ -683,14 +675,6 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     startBtn.addEventListener('click', startBtn._listener);
   }
 
-  // Attached once — the three skill buttons are static markup, not re-created per render,
-  // so (per GAMESTACK pattern) we wire listeners at init time rather than re-binding on every renderWaiting() call.
-  document.getElementById('waitingAiAddBtns').querySelectorAll('.diff-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      wsSend({ type: 'add_ai', roomCode: state.roomCode, skill: btn.dataset.skill });
-    });
-  });
-
   function renderWaiting() {
     const container = document.getElementById('waitingPlayers');
     container.innerHTML = '';
@@ -717,17 +701,9 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     const aiCount = state.roomState.players.filter(p => p.isAI).length;
     document.getElementById('waitingStatus').textContent =
       `${total}/4 players${aiCount > 0 ? ` · ${aiCount} AI` : ''} · Waiting…`;
-
-    // Host can fill any remaining empty seat with AI at any point while waiting —
-    // e.g. after friends join via room code but a 4th human never shows up.
-    const aiAddRow = document.getElementById('waitingAiAddRow');
-    aiAddRow.style.display = (state.isHost && total < 4) ? '' : 'none';
-
-    // Start Game is a manual fallback for the (normally auto-started) total===4 case —
-    // it must never be shown when total < 4, since the server rejects start_game unless
-    // the table is already full (host should use "Add AI" above to fill it first).
     const startBtn = document.getElementById('startGameBtn');
-    const canStart = state.isHost && total === 4;
+    // Host can manually start if there are AI filling the remaining slots
+    const canStart = state.isHost && total >= 2 && total < 4;
     startBtn.style.display = canStart ? '' : 'none';
   }
 
