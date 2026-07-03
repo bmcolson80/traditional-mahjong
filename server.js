@@ -222,6 +222,42 @@ app.get('/api/push/status', requireAuth, (req, res) => {
   res.json({ subscribed: subs.length > 0 });
 });
 
+// Active games for the current user (for dashboard rejoin section)
+app.get('/api/my-games', requireAuth, (req, res) => {
+  try {
+    const rows = all(
+      `SELECT DISTINCT g.room_code, g.phase, g.state_json
+       FROM games g
+       JOIN game_players gp ON gp.game_id = g.id
+       WHERE gp.user_id = ? AND g.phase IN ('waiting','playing')
+       ORDER BY g.created_at DESC LIMIT 10`,
+      [req.user.id]
+    );
+    const games = rows.map(row => {
+      try {
+        const s = JSON.parse(row.state_json);
+        return {
+          roomCode: row.room_code,
+          phase: row.phase,
+          roundWind: s.round ? ['East','South','West','North'][s.round.windIndex ?? 0] : 'East',
+          handNumber: s.round?.handNumber ?? 1,
+          turnSeat: s.turnSeat,
+          players: (s.players ?? []).map(p => ({
+            displayName: p.displayName,
+            seat: p.seat,
+            isAI: p.isAI ?? false,
+            score: p.score ?? 0,
+          })),
+        };
+      } catch { return null; }
+    }).filter(Boolean);
+    res.json(games);
+  } catch (err) {
+    console.error('my-games error:', err);
+    res.status(500).json({ error: 'Failed to load games' });
+  }
+});
+
 async function notifyUser(userId, payload) {
   if (!pushConfigured) return;
   const subs = all('SELECT * FROM push_subscriptions WHERE user_id = ?', [userId]);
@@ -288,15 +324,55 @@ function genRoomCode() {
   return Math.random().toString(36).slice(2, 7).toUpperCase();
 }
 
+function serializeRoom(room) {
+  // Exclude transient fields that can't survive a restart
+  return JSON.stringify(room, (key, value) => key === '_aiTimeout' ? undefined : value);
+}
+
 function persistRoom(room) {
   try {
     run(
       `INSERT INTO games (room_code, phase, state_json) VALUES (?, ?, ?)
        ON CONFLICT(room_code) DO UPDATE SET phase = excluded.phase, state_json = excluded.state_json`,
-      [room.code, room.phase, JSON.stringify({ turnSeat: room.turnSeat, players: room.players.map(p => ({ seat: p.seat, score: p.score })) })]
+      [room.code, room.phase, serializeRoom(room)]
     );
+    // Refresh game_players so /api/my-games can find this user's active games
+    const gameRow = get('SELECT id FROM games WHERE room_code = ?', [room.code]);
+    if (gameRow) {
+      run('DELETE FROM game_players WHERE game_id = ?', [gameRow.id]);
+      for (const p of room.players) {
+        if (p.userId) {
+          run(
+            `INSERT INTO game_players (game_id, user_id, player_id, seat, display_name)
+             VALUES (?, ?, ?, ?, ?)`,
+            [gameRow.id, p.userId, p.playerId, p.seat, p.displayName]
+          );
+        }
+      }
+    }
   } catch (err) {
     console.error('persistRoom failed:', err);
+  }
+}
+
+export async function loadRoomsFromDB() {
+  try {
+    const activeGames = all(`SELECT room_code, state_json FROM games WHERE phase IN ('waiting','playing')`);
+    let count = 0;
+    for (const row of activeGames) {
+      try {
+        const room = JSON.parse(row.state_json);
+        if (room && room.code && room.players) {
+          rooms.set(room.code, room);
+          count++;
+        }
+      } catch (err) {
+        console.error(`Failed to restore room ${row.room_code}:`, err);
+      }
+    }
+    if (count > 0) console.log(`Restored ${count} active room(s) from database`);
+  } catch (err) {
+    console.error('loadRoomsFromDB failed:', err);
   }
 }
 
@@ -581,7 +657,7 @@ function handleMessage(ws, msg) {
       const seat = G.addPlayer(room, { playerId, userId: msg.userId, displayName: msg.displayName ?? 'Player' });
       clients.set(ws, { roomCode: room.code, playerId, userId: msg.userId, displayName: msg.displayName });
       persistRoom(room);
-      send(ws, { type: 'room_joined', roomCode: room.code, seat });
+      send(ws, { type: 'room_joined', roomCode: room.code, seat, phase: room.phase });
       broadcastRoomState(room);
       if (room.players.length === 4) {
         G.startGame(room);
@@ -716,6 +792,29 @@ function handleMessage(ws, msg) {
       scheduleAiTurn(room);
       break;
     }
+    case 'rejoin_room': {
+      const room = rooms.get(msg.roomCode);
+      if (!room) return send(ws, { type: 'error', message: 'Room not found — game may have ended' });
+      // Match by userId (preferred) or by the original playerId
+      const player = room.players.find(p =>
+        (msg.userId && p.userId === msg.userId) ||
+        p.playerId === msg.playerId
+      );
+      if (!player) return send(ws, { type: 'error', message: 'You are not in this game' });
+      // Refresh the playerId in case the browser generated a new one after restart
+      if (msg.playerId) player.playerId = msg.playerId;
+      clients.set(ws, {
+        roomCode: room.code,
+        playerId: player.playerId,
+        userId: msg.userId ?? player.userId,
+        displayName: player.displayName,
+      });
+      send(ws, { type: 'room_joined', roomCode: room.code, seat: player.seat });
+      broadcastRoomState(room);
+      // Resume AI scheduling if the game is mid-play
+      if (room.phase === 'playing') scheduleAiTurn(room);
+      break;
+    }
     default:
       send(ws, { type: 'error', message: `Unknown message type: ${msg.type}` });
   }
@@ -748,6 +847,7 @@ const PORT = process.env.PORT ?? 3000;
 
 export async function startServer() {
   await initDB();
+  await loadRoomsFromDB();
   return new Promise((resolve) => {
     server.listen(PORT, () => {
       console.log(`Mahjong server listening on port ${PORT}`);

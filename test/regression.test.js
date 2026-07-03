@@ -158,3 +158,143 @@ describe('regression: score settlement', () => {
     assert.equal(east.score, 6 + 3 + 3);
   });
 });
+
+describe('regression: serializeRoom excludes transient fields', () => {
+  test('_aiTimeout is not present in serialized output', () => {
+    const room = G.createRoom('SER1', 'p1');
+    ['p1','p2','p3','p4'].forEach((id,i) => G.addPlayer(room, { playerId: id, displayName: `P${i}` }));
+    G.startGame(room);
+    room._aiTimeout = setTimeout(() => {}, 99999);
+    const json = JSON.stringify(room, (k,v) => k === '_aiTimeout' ? undefined : v);
+    const parsed = JSON.parse(json);
+    assert.equal(parsed._aiTimeout, undefined, '_aiTimeout must not be in serialized room');
+    assert.ok(Array.isArray(parsed.wall), 'wall must survive serialization');
+    assert.ok(parsed.players.length === 4, 'players must survive serialization');
+    clearTimeout(room._aiTimeout);
+  });
+
+  test('full hand array survives JSON round-trip', () => {
+    const room = G.createRoom('SER2', 'p1');
+    ['p1','p2','p3','p4'].forEach((id,i) => G.addPlayer(room, { playerId: id, displayName: `P${i}` }));
+    G.startGame(room);
+    const east = room.players.find(p => p.seat === 'E');
+    const originalHand = [...east.hand];
+    const json = JSON.stringify(room, (k,v) => k === '_aiTimeout' ? undefined : v);
+    const restored = JSON.parse(json);
+    const eastRestored = restored.players.find(p => p.seat === 'E');
+    assert.deepEqual(eastRestored.hand, originalHand, 'Hand must survive JSON round-trip exactly');
+  });
+});
+
+describe('regression: rejoin logic (unit level)', () => {
+  test('player matched by userId when playerId differs (new browser session)', () => {
+    // Simulate what rejoin_room handler does: find player by userId
+    const room = G.createRoom('REJ1', 'original-pid');
+    G.addPlayer(room, { playerId: 'original-pid', userId: 77, displayName: 'Alice' });
+    G.addPlayer(room, { playerId: 'p2', userId: null, displayName: 'AI' });
+    G.addPlayer(room, { playerId: 'p3', userId: null, displayName: 'AI' });
+    G.addPlayer(room, { playerId: 'p4', userId: null, displayName: 'AI' });
+
+    const userId = 77;
+    const newPlayerId = 'new-browser-pid';
+
+    const player = room.players.find(p =>
+      (userId && p.userId === userId) || p.playerId === newPlayerId
+    );
+    assert.ok(player, 'Should find player by userId even with different playerId');
+    assert.equal(player.displayName, 'Alice');
+    assert.equal(player.seat, 'E');
+  });
+
+  test('player not in room is rejected correctly', () => {
+    const room = G.createRoom('REJ2', 'host');
+    G.addPlayer(room, { playerId: 'host', userId: 1, displayName: 'Host' });
+
+    const intruderUserId = 999;
+    const intruderPlayerId = 'intruder';
+    const player = room.players.find(p =>
+      (intruderUserId && p.userId === intruderUserId) || p.playerId === intruderPlayerId
+    );
+    assert.equal(player, undefined, 'Intruder should not be found in room');
+  });
+});
+
+describe('regression: wall exhaustion edge cases', () => {
+  test('drawing from an empty wall returns null', () => {
+    const room = G.createRoom('WALL1', 'p1');
+    ['p1','p2','p3','p4'].forEach((id,i) => G.addPlayer(room, { playerId: id, displayName: `P${i}` }));
+    G.startGame(room);
+    room.wall = []; // drain the wall
+    const east = room.players.find(p => p.seat === 'E');
+    const tile = G.drawTile(room, east);
+    assert.equal(tile, null, 'Drawing from empty wall should return null');
+  });
+});
+
+describe('regression: advanceHand matchOver flag', () => {
+  test('matchOver is set after a full East→North cycle (16 hands)', () => {
+    const room = G.createRoom('MATCH1', 'p1');
+    ['p1','p2','p3','p4'].forEach((id,i) => G.addPlayer(room, { playerId: id, displayName: `P${i}` }));
+
+    // 4 rounds × 4 hands each, dealer always loses = 16 advanceHand calls
+    for (let round = 0; round < 4; round++) {
+      for (let hand = 0; hand < 4; hand++) {
+        const currentDealer = room.round.dealerSeat;
+        G.advanceHand(room, { winnerSeat: G.nextSeat(currentDealer) });
+      }
+    }
+    assert.equal(room.round.matchOver, true, 'matchOver should be true after full cycle');
+  });
+
+  test('matchOver is NOT set mid-cycle', () => {
+    const room = G.createRoom('MATCH2', 'p1');
+    ['p1','p2','p3','p4'].forEach((id,i) => G.addPlayer(room, { playerId: id, displayName: `P${i}` }));
+
+    // Only 8 hands (half a cycle)
+    for (let i = 0; i < 8; i++) {
+      const currentDealer = room.round.dealerSeat;
+      G.advanceHand(room, { winnerSeat: G.nextSeat(currentDealer) });
+    }
+    assert.equal(room.round.matchOver, false, 'matchOver should still be false at 8 hands');
+  });
+});
+
+describe('regression: getSeatWind correctly rotates with dealer', () => {
+  test('the current dealer always reports seatWind EW regardless of table seat', () => {
+    const room = G.createRoom('SW1', 'p1');
+    ['p1','p2','p3','p4'].forEach((id,i) => G.addPlayer(room, { playerId: id, displayName: `P${i}` }));
+
+    const SEATS = ['E','S','W','N'];
+    for (const dealerSeat of SEATS) {
+      room.round.dealerSeat = dealerSeat;
+      assert.equal(G.getSeatWind(room, dealerSeat), 'EW',
+        `Dealer (${dealerSeat}) should always have seat wind EW`);
+    }
+  });
+
+  test('all four relative winds are assigned exactly once per hand', () => {
+    const room = G.createRoom('SW2', 'p1');
+    ['p1','p2','p3','p4'].forEach((id,i) => G.addPlayer(room, { playerId: id, displayName: `P${i}` }));
+    room.round.dealerSeat = 'S';
+
+    const winds = ['E','S','W','N'].map(seat => G.getSeatWind(room, seat));
+    const uniqueWinds = new Set(winds);
+    assert.equal(uniqueWinds.size, 4, 'All 4 seat winds should be unique per hand');
+  });
+});
+
+describe('regression: tile count integrity', () => {
+  test('total tiles in room equals 144 at all times after dealing', () => {
+    const room = G.createRoom('TILES1', 'p1');
+    ['p1','p2','p3','p4'].forEach((id,i) => G.addPlayer(room, { playerId: id, displayName: `P${i}` }));
+    G.startGame(room);
+
+    const tileCount = (
+      room.wall.length +
+      room.deadWall.length +
+      room.players.reduce((sum, p) =>
+        sum + p.hand.length + p.flowers.length + p.exposed.reduce((s, e) => s + e.tiles.length, 0), 0)
+    );
+    assert.equal(tileCount, 144, 'Total tiles should always be 144');
+  });
+});

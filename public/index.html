@@ -73,7 +73,13 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
 .add-ai-btn:disabled{opacity:.3;cursor:not-allowed}
 
 /* ── Notifications ───────────────────────────────────────────────────────── */
-.notif-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.06)}
+.game-card{background:var(--navy);border:1px solid rgba(201,162,39,.15);border-radius:var(--radius-sm);padding:14px;margin-bottom:8px;display:flex;align-items:center;gap:12px}
+.game-card-info{flex:1;min-width:0}
+.game-card-code{font-family:'Cinzel',serif;font-size:18px;letter-spacing:3px;color:var(--gold)}
+.game-card-meta{font-size:11px;color:rgba(255,255,255,.4);margin-top:3px;letter-spacing:1px}
+.game-card-players{display:flex;gap:4px;margin-top:6px;flex-wrap:wrap}
+.player-pip{width:8px;height:8px;border-radius:50%;flex-shrink:0;display:inline-block}
+.no-games{text-align:center;color:rgba(255,255,255,.3);font-size:12px;padding:16px;letter-spacing:1px}
 .notif-row:last-child{border-bottom:none}
 .notif-label{font-size:13px;color:var(--cream-dark)}
 .toggle{position:relative;display:inline-block;width:42px;height:24px;flex-shrink:0}
@@ -237,6 +243,11 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     </div>
   </div>
   <div class="dashboard-body">
+
+    <div id="activeGamesSection" style="display:none">
+      <div class="section-title">YOUR ACTIVE GAMES</div>
+      <div id="activeGamesList"></div>
+    </div>
 
     <div class="section-title">NEW GAME</div>
     <div class="dash-card">
@@ -439,6 +450,75 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     showScreen('dashboard');
     setButtonsEnabled(true);
     initPushToggle();
+    await loadActiveGames();
+  }
+
+  async function loadActiveGames() {
+    try {
+      const games = await apiCall('/api/my-games');
+      renderActiveGames(games);
+    } catch (err) {
+      console.error('Failed to load active games:', err);
+    }
+  }
+
+  function renderActiveGames(games) {
+    const section = document.getElementById('activeGamesSection');
+    const list = document.getElementById('activeGamesList');
+    if (!games || games.length === 0) {
+      section.style.display = 'none';
+      return;
+    }
+    section.style.display = '';
+    list.innerHTML = '';
+    const SEAT_COLORS = { E: '#c9a227', S: '#4eb8c8', W: '#c94040', N: '#7ec864' };
+    for (const game of games) {
+      const card = document.createElement('div');
+      card.className = 'game-card';
+      const info = document.createElement('div');
+      info.className = 'game-card-info';
+      const code = document.createElement('div');
+      code.className = 'game-card-code';
+      code.textContent = game.roomCode;
+      const meta = document.createElement('div');
+      meta.className = 'game-card-meta';
+      meta.textContent = game.phase === 'waiting'
+        ? 'WAITING · ' + game.players.length + '/4 players'
+        : game.roundWind.toUpperCase() + ' ROUND · HAND ' + game.handNumber;
+      const pips = document.createElement('div');
+      pips.className = 'game-card-players';
+      for (const p of game.players) {
+        const pip = document.createElement('span');
+        pip.className = 'player-pip';
+        pip.style.background = p.isAI ? '#666' : (SEAT_COLORS[p.seat] || '#888');
+        pip.title = p.displayName + ' (' + p.seat + ') ' + p.score + 'pts';
+        pips.appendChild(pip);
+      }
+      info.appendChild(code);
+      info.appendChild(meta);
+      info.appendChild(pips);
+      card.appendChild(info);
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-secondary btn-sm';
+      btn.textContent = 'Rejoin';
+      btn.style.margin = '0';
+      const roomCode = game.roomCode;
+      btn.addEventListener('click', function () {
+        if (!state.ws || state.ws.readyState !== WebSocket.OPEN) connectWS();
+        setTimeout(function () {
+          state.roomCode = roomCode;
+          state.isHost = false;
+          wsSend({
+            type: 'rejoin_room',
+            roomCode: roomCode,
+            playerId: state.playerId,
+            userId: state.user && state.user.id,
+          });
+        }, 150);
+      });
+      card.appendChild(btn);
+      list.appendChild(card);
+    }
   }
 
   // ---------- Push notifications ----------
@@ -526,8 +606,12 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
       case 'room_joined':
         state.roomCode = msg.roomCode;
         state.mySeat = msg.seat;
-        state.isHost = false;
-        enterWaitingRoom();
+        // Rejoin an active game → room_state arrives immediately after and renders game
+        if (msg.phase === 'playing' || msg.phase === 'finished') {
+          showScreen('game'); // avoid waiting room flash; room_state will fully render
+        } else {
+          enterWaitingRoom();
+        }
         break;
       case 'room_state':
         state.roomState = msg.room;
