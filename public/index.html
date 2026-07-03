@@ -623,6 +623,7 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
         break;
       case 'room_state':
         state.roomState = msg.room;
+        state.isHost = msg.room.hostPlayerId === state.playerId; // re-derived every update — survives reconnects/rejoins
         const me = msg.room.players.find(p => p.playerId === state.playerId);
         if (me) state.mySeat = me.seat;
         if (msg.room.phase === 'waiting') renderWaiting();

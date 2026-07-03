@@ -105,6 +105,34 @@ describe('WebSocket game flow', () => {
     sockets.forEach(s => s.close());
   });
 
+  test('room_state exposes hostPlayerId so the client can re-derive host status after a reconnect', async () => {
+    const ws1 = await connect();
+    const createdP = waitForMessage(ws1, m => m.type === 'room_created');
+    ws1.send(JSON.stringify({ type: 'create_room', playerId: 'host-reco-p0', displayName: 'Host' }));
+    const { roomCode } = await createdP;
+
+    const stateP = waitForMessage(ws1, m => m.type === 'room_state');
+    // trigger a room_state broadcast by adding an AI (mirrors what the client would see live)
+    ws1.send(JSON.stringify({ type: 'add_ai', roomCode, skill: 'rookie' }));
+    const state1 = await stateP;
+    assert.equal(state1.room.hostPlayerId, 'host-reco-p0');
+
+    // Simulate the host's connection dropping and reconnecting (e.g. phone screen lock, page refresh)
+    ws1.close();
+    await new Promise(r => setTimeout(r, 50));
+    const ws2 = await connect();
+    const joinedP = waitForMessage(ws2, m => m.type === 'room_joined');
+    const stateP2 = waitForMessage(ws2, m => m.type === 'room_state');
+    ws2.send(JSON.stringify({ type: 'rejoin_room', roomCode, playerId: 'host-reco-p0' }));
+    await joinedP;
+    const state2 = await stateP2;
+
+    // The reconnected client must still be told it's the host — this is what lets the
+    // waiting-room "Add AI" / "Start Game" controls survive a refresh instead of vanishing.
+    assert.equal(state2.room.hostPlayerId, 'host-reco-p0', 'hostPlayerId must persist across reconnects');
+    ws2.close();
+  });
+
   test('invalid message type returns an error, not a crash', async () => {
     const ws = await connect();
     const errPromise = waitForMessage(ws, m => m.type === 'error');

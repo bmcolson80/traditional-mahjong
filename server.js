@@ -296,6 +296,7 @@ function publicRoomView(room, forSeat) {
     roundWind: G.getRoundWind(room),
     currentDiscard: room.currentDiscard,
     wallCount: room.wall.length,
+    hostPlayerId: room.hostPlayerId,
     players: room.players.map(p => ({
       playerId: p.playerId,
       displayName: p.displayName,
