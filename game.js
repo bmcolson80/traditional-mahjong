@@ -56,9 +56,13 @@ export function createRoom(roomCode, hostPlayerId) {
     // Round/dealer tracking. windIndex 0-3 = East/South/West/North round.
     // dealerSeat is the physical seat currently acting as dealer for this hand.
     // handNumber counts 1-4 within the current round wind (dealer rotates through all 4 seats).
-    round: { windIndex: 0, handNumber: 1, dealerSeat: 'E', matchOver: false },
+    // dealerStreak: consecutive hands the current dealer has WON (not draws).
+    // Resets to 0 whenever the deal passes to a new dealer. Multiplies chip payouts
+    // on dealer wins (see settleScore).
+    round: { windIndex: 0, handNumber: 1, dealerSeat: 'E', matchOver: false, dealerStreak: 0 },
     hostPlayerId,
     gameState: {},
+    chipsInitialized: false, // set true once starting chips are assigned (first startGame of the match)
   };
 }
 
@@ -79,10 +83,19 @@ export function getSeatWind(room, physicalSeat) {
 // Call after a hand ends to advance dealer/round state for the next hand.
 // Dealer retains their seat (and the round wind stays the same) if the dealer
 // won or the hand was a draw — otherwise dealership passes to the next seat.
+// dealerStreak (house rule): increments each time the dealer wins consecutively,
+// resets to 0 the moment the deal passes to someone else. A draw keeps the dealer
+// in their seat but does not itself count as a "win", so the streak is unaffected.
 export function advanceHand(room, { winnerSeat, isDraw = false } = {}) {
+  if (room.round.dealerStreak === undefined) room.round.dealerStreak = 0; // back-compat for older persisted rooms
   const dealerRetains = isDraw || winnerSeat === room.round.dealerSeat;
-  if (dealerRetains) return room.round;
 
+  if (dealerRetains) {
+    if (!isDraw && winnerSeat === room.round.dealerSeat) room.round.dealerStreak += 1;
+    return room.round;
+  }
+
+  room.round.dealerStreak = 0;
   room.round.dealerSeat = nextSeat(room.round.dealerSeat);
   room.round.handNumber += 1;
   if (room.round.handNumber > 4) {
@@ -93,22 +106,57 @@ export function advanceHand(room, { winnerSeat, isDraw = false } = {}) {
   return room.round;
 }
 
-// Simple point settlement: winner collects `fan` points from each opponent on a
-// self-drawn win, or double from the discarder (and single from the other two)
-// when winning off a discard. This is a common convention, not a fixed universal rule —
-// adjust the multipliers here if your table plays a different settlement style.
+// ---------- Chip settlement (house rules) ----------
+// Fan → chip conversion table: exponential doubling, capped at 64 (limit hand).
+// 0=1, 1=2, 2=4, 3=8, 4=16, 5=32, 6+=64
+export function fanToChips(fan) {
+  if (fan >= 6) return 64;
+  return 2 ** fan;
+}
+
+// Chip settlement under the custom house rules:
+//  - Discard win: only the discarder pays the winner; everyone else pays nothing.
+//  - Self-draw win: every other active player pays base chip value + 1 extra chip.
+//  - Dealer wins: the total payout the dealer receives is doubled.
+//  - Non-dealer wins: the dealer (as a payer) pays double the standard chip value.
+//  - Dealer win streak: consecutive dealer wins multiply the payout further
+//    (1st win = x1, 2nd consecutive win = x2, 3rd = x3, ...), on top of the dealer-win double above.
+//  - Bankruptcy: if any payer's chips hit 0 or below, `bankruptSeats` is returned
+//    non-empty so the caller can end the match immediately.
 export function settleScore(room, winnerSeat, fan, { selfDraw, discarderSeat } = {}) {
   const winner = room.players.find(p => p.seat === winnerSeat);
   const others = room.players.filter(p => p.seat !== winnerSeat);
+  const dealerSeat = room.round.dealerSeat;
+  const winnerIsDealer = winnerSeat === dealerSeat;
+  const streak = room.round.dealerStreak ?? 0;
+  const streakMultiplier = winnerIsDealer ? streak + 1 : 1;
+  const base = fanToChips(fan);
+
   let winnerGain = 0;
+  const bankruptSeats = [];
   for (const p of others) {
-    let amount = fan;
-    if (!selfDraw && p.seat === discarderSeat) amount = fan * 2;
+    let amount = 0;
+    if (selfDraw) {
+      amount = base + 1; // self-draw: all active players pay base + 1 extra chip each
+    } else if (p.seat === discarderSeat) {
+      amount = base; // discard win: only the discarder pays
+    }
+
+    if (amount > 0) {
+      if (!winnerIsDealer && p.seat === dealerSeat) amount *= 2; // non-dealer win: dealer pays double
+      if (winnerIsDealer) amount *= 2 * streakMultiplier; // dealer win: total doubled, plus win-streak multiplier
+    }
+
     p.score -= amount;
     winnerGain += amount;
+    if (amount > 0 && p.score <= 0) bankruptSeats.push(p.seat);
   }
   winner.score += winnerGain;
-  return room.players.map(p => ({ seat: p.seat, score: p.score }));
+
+  return {
+    standings: room.players.map(p => ({ seat: p.seat, score: p.score })),
+    bankruptSeats,
+  };
 }
 
 export function addPlayer(room, { playerId, userId, displayName }) {
@@ -126,6 +174,16 @@ export function startGame(room) {
   const wall = buildWall();
   room.deadWall = wall.slice(0, 14);
   let live = wall.slice(14);
+
+  // Starting chips (house rule): 500/player in a full 4-human table, 1000/player
+  // when AI has filled in for a 2 or 3 player game. Only assigned once per match —
+  // p.score is intentionally NOT reset on subsequent hands so chips carry across the match.
+  if (!room.chipsInitialized) {
+    const humanCount = room.players.filter(p => !p.isAI).length;
+    const startingChips = humanCount <= 3 ? 1000 : 500;
+    for (const p of room.players) p.score = startingChips;
+    room.chipsInitialized = true;
+  }
 
   for (const p of room.players) {
     p.hand = [];
@@ -207,8 +265,8 @@ export function canKongFromDiscard(hand, tile) {
 }
 
 export function canChow(hand, tile, claimerSeat, discarderSeat) {
-  // Chow only allowed from the player immediately to your left
-  if (nextSeat(discarderSeat) !== claimerSeat) return false;
+  // House rule: free-for-all chow — any player may claim a chow from any discarder
+  // (the traditional "left player only" restriction is intentionally removed).
   if (isHonorTile(tile) || isBonusTile(tile)) return false;
   const suit = tile.slice(-1);
   const num = parseInt(tile.slice(0, -1), 10);
@@ -298,25 +356,39 @@ function countTiles(tiles) {
 
 // Recursively check whether `tiles` can form `setsNeeded` sets (pung/chow) + exactly one pair
 function canDecompose(tiles, setsNeeded) {
-  if (tiles.length !== setsNeeded * 3 + 2) return false;
-  const sorted = tiles.slice().sort();
-  return tryDecompose(sorted, setsNeeded, false);
+  return analyzeSets(tiles, setsNeeded) !== null;
 }
 
-function tryDecompose(tiles, setsNeeded, pairUsed) {
-  if (tiles.length === 0) return setsNeeded === 0 && pairUsed;
+// Like canDecompose, but also returns which sets (pung/chow) and pair were used —
+// needed for scoring categories like "All Chows" / "All Pungs" that depend on the
+// concealed portion's composition, not just the exposed melds.
+// Ties are broken the same way the original win-detection walk did (pair, then pung,
+// then chow, taking the first tile in sorted order) so existing win-detection behavior
+// is unchanged; this is a best-effort classification, not an optimal-fan search.
+function analyzeSets(tiles, setsNeeded) {
+  if (tiles.length !== setsNeeded * 3 + 2) return null;
+  const sorted = tiles.slice().sort();
+  return decomposeCapture(sorted, setsNeeded, null, []);
+}
+
+function decomposeCapture(tiles, setsNeeded, pair, sets) {
+  if (tiles.length === 0) {
+    return (setsNeeded === 0 && pair) ? { pair, sets } : null;
+  }
   const counts = countTiles(tiles);
   const first = tiles[0];
 
   // Try pair
-  if (!pairUsed && counts[first] >= 2) {
+  if (!pair && counts[first] >= 2) {
     const remaining = removeN(tiles, first, 2);
-    if (tryDecompose(remaining, setsNeeded, true)) return true;
+    const result = decomposeCapture(remaining, setsNeeded, first, sets);
+    if (result) return result;
   }
   // Try pung
   if (setsNeeded > 0 && counts[first] >= 3) {
     const remaining = removeN(tiles, first, 3);
-    if (tryDecompose(remaining, setsNeeded - 1, pairUsed)) return true;
+    const result = decomposeCapture(remaining, setsNeeded - 1, pair, [...sets, { type: 'pung', tiles: [first, first, first] }]);
+    if (result) return result;
   }
   // Try chow (suited tiles only)
   if (setsNeeded > 0 && !isHonorTile(first) && !isBonusTile(first)) {
@@ -330,11 +402,12 @@ function tryDecompose(tiles, setsNeeded, pairUsed) {
         remaining.splice(remaining.indexOf(first), 1);
         remaining.splice(remaining.indexOf(t2), 1);
         remaining.splice(remaining.indexOf(t3), 1);
-        if (tryDecompose(remaining, setsNeeded - 1, pairUsed)) return true;
+        const result = decomposeCapture(remaining, setsNeeded - 1, pair, [...sets, { type: 'chow', tiles: [first, t2, t3] }]);
+        if (result) return result;
       }
     }
   }
-  return false;
+  return null;
 }
 
 function removeN(tiles, tile, n) {
@@ -344,9 +417,17 @@ function removeN(tiles, tile, n) {
 }
 
 // ---------- Basic scoring ----------
-// A simplified fan-count scorer covering common traditional categories.
-// Returns { fan, breakdown } — intended as a starting point, tune to your table's ruleset.
-export function scoreHand(player, exposed, concealedHand, winningTile, { selfDraw, roundWind, seatWind } = {}) {
+// A fan-count scorer covering common traditional categories plus the table's house rules:
+//   All Chows = 2 fan, One Suit + Honors = 3 fan, All Pungs = 3 fan, Pure One Suit = 6 fan,
+//   Thirteen Orphans = limit hand (fan pinned at cap → 64 chips), Chicken Hand (0 fan) = 1 chip.
+// Returns { fan, breakdown }. Pass handType from checkWin's result.type when available
+// ('standard' | 'seven_pairs' | 'thirteen_orphans') so special hands score correctly.
+export function scoreHand(player, exposed, concealedHand, winningTile, { selfDraw, roundWind, seatWind, handType = 'standard' } = {}) {
+  if (handType === 'thirteen_orphans') {
+    // Limit hand — fan is pinned at the fanToChips cap (6+ = 64 chips), exact value beyond that doesn't matter.
+    return { fan: 6, breakdown: ['Thirteen Orphans (Limit Hand)'] };
+  }
+
   const allTiles = [...concealedHand, winningTile, ...exposed.flatMap(s => s.tiles)];
   const breakdown = [];
   let fan = 0;
@@ -354,14 +435,30 @@ export function scoreHand(player, exposed, concealedHand, winningTile, { selfDra
   const suits = new Set(allTiles.filter(t => !isHonorTile(t) && !isBonusTile(t)).map(t => t.slice(-1)));
   const hasHonors = allTiles.some(isHonorTile);
 
-  if (suits.size === 1 && !hasHonors) { fan += 4; breakdown.push('Pure One Suit (Full Flush)'); }
-  else if (suits.size === 1 && hasHonors) { fan += 2; breakdown.push('Half Flush'); }
+  if (suits.size === 1 && !hasHonors) { fan += 6; breakdown.push('Pure One Suit'); }
+  else if (suits.size === 1 && hasHonors) { fan += 3; breakdown.push('One Suit + Honors'); }
 
   if (exposed.length === 0) { fan += 1; breakdown.push('Concealed Hand'); }
   if (selfDraw) { fan += 1; breakdown.push('Self-Drawn'); }
 
-  const allPungKong = exposed.every(s => s.type !== 'chow');
-  if (allPungKong) { fan += 1; breakdown.push('All Triplets'); }
+  // All Chows / All Pungs require knowing how the concealed portion breaks down into sets,
+  // not just the exposed melds — only meaningful for standard (4 sets + pair) hands.
+  if (handType === 'standard') {
+    const setsNeeded = 4 - exposed.length;
+    const concealedAnalysis = analyzeSets([...concealedHand, winningTile].sort(), setsNeeded);
+    if (concealedAnalysis) {
+      const concealedChows = concealedAnalysis.sets.filter(s => s.type === 'chow').length;
+      const concealedPungs = concealedAnalysis.sets.filter(s => s.type === 'pung').length;
+      const exposedChows = exposed.filter(s => s.type === 'chow').length;
+      const exposedPungKongs = exposed.filter(s => s.type === 'pung' || s.type === 'kong').length;
+      const totalSets = exposed.length + concealedAnalysis.sets.length;
+
+      if (totalSets === 4) {
+        if (exposedChows + concealedChows === 4) { fan += 2; breakdown.push('All Chows'); }
+        else if (exposedPungKongs + concealedPungs === 4) { fan += 3; breakdown.push('All Pungs'); }
+      }
+    }
+  }
 
   for (const dragon of DRAGONS) {
     if (allTiles.filter(t => t === dragon).length >= 3) { fan += 1; breakdown.push(`Dragon Pung (${dragon})`); }
@@ -369,7 +466,7 @@ export function scoreHand(player, exposed, concealedHand, winningTile, { selfDra
   if (roundWind && allTiles.filter(t => t === roundWind).length >= 3) { fan += 1; breakdown.push('Round Wind Pung'); }
   if (seatWind && allTiles.filter(t => t === seatWind).length >= 3) { fan += 1; breakdown.push('Seat Wind Pung'); }
 
-  if (fan === 0) { fan = 1; breakdown.push('Base Hand'); }
+  if (fan === 0) breakdown.push('Chicken Hand'); // 0 fan → 1 chip via fanToChips
 
   return { fan, breakdown };
 }

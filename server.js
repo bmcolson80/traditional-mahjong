@@ -525,17 +525,16 @@ function executeAiClaims(room) {
     }
   }
 
-  // Priority 4: Chow (only the player immediately left of discarder)
-  const chowSeat = G.nextSeat(fromSeat);
-  const chower = room.players.find(p => p.seat === chowSeat && p.isAI);
-  if (chower) {
-    const options = G.canChow(chower.hand, tile, chowSeat, fromSeat);
-    if (options && options.length > 0 && AI.shouldClaimChow(chower.hand, tile, chower.exposed, chower.aiSkill, chowSeat, fromSeat)) {
-      G.applyChow(room, chower, options[0], tile, fromSeat);
-      room.turnSeat = chower.seat;
+  // Priority 4: Chow (house rule — free-for-all, any player may claim from any discarder)
+  for (const p of room.players) {
+    if (!p.isAI || p.seat === fromSeat) continue;
+    const options = G.canChow(p.hand, tile, p.seat, fromSeat);
+    if (options && options.length > 0 && AI.shouldClaimChow(p.hand, tile, p.exposed, p.aiSkill, p.seat, fromSeat)) {
+      G.applyChow(room, p, options[0], tile, fromSeat);
+      room.turnSeat = p.seat;
       persistRoom(room);
       broadcastRoomState(room);
-      broadcast(room, { type: 'chow_claimed', playerId: chower.playerId, sequence: options[0] });
+      broadcast(room, { type: 'chow_claimed', playerId: p.playerId, sequence: options[0] });
       scheduleAiTurn(room);
       return;
     }
@@ -552,13 +551,19 @@ function executeAiWin(room, player, selfDraw, winningTile, discarderSeat) {
   if (!result.win) return;
   const roundWind = G.getRoundWind(room);
   const seatWind  = G.getSeatWind(room, player.seat);
-  const score     = G.scoreHand(player, player.exposed, hCheck, wTile, { selfDraw, roundWind, seatWind });
-  const standings = G.settleScore(room, player.seat, score.fan, { selfDraw, discarderSeat });
+  const score     = G.scoreHand(player, player.exposed, hCheck, wTile, { selfDraw, roundWind, seatWind, handType: result.type });
+  const settlement = G.settleScore(room, player.seat, score.fan, { selfDraw, discarderSeat });
   G.advanceHand(room, { winnerSeat: player.seat });
   room.phase = 'finished';
+  // Bankruptcy house rule: the moment any payer's chips hit 0 or below, the match ends instantly.
+  if (settlement.bankruptSeats.length > 0) room.round.matchOver = true;
   persistRoom(room);
   broadcastRoomState(room);
-  broadcast(room, { type: 'game_won', playerId: player.playerId, seat: player.seat, result, score, standings, round: room.round, matchOver: room.round.matchOver });
+  broadcast(room, {
+    type: 'game_won', playerId: player.playerId, seat: player.seat, result, score,
+    standings: settlement.standings, bankruptSeats: settlement.bankruptSeats,
+    round: room.round, matchOver: room.round.matchOver,
+  });
   for (const p of room.players) {
     if (p.userId) notifyUser(p.userId, { title: 'Mahjong!', body: `${player.displayName} won!` });
   }
@@ -763,17 +768,20 @@ function handleMessage(ws, msg) {
       const roundWind = G.getRoundWind(room);
       const seatWind = G.getSeatWind(room, player.seat);
       const score = G.scoreHand(player, player.exposed, handForCheck, winningTile, {
-        selfDraw, roundWind, seatWind,
+        selfDraw, roundWind, seatWind, handType: result.type,
       });
-      const standings = G.settleScore(room, player.seat, score.fan, {
+      const settlement = G.settleScore(room, player.seat, score.fan, {
         selfDraw, discarderSeat: room.currentDiscard?.fromSeat,
       });
       G.advanceHand(room, { winnerSeat: player.seat });
       room.phase = 'finished';
+      // Bankruptcy house rule: the moment any payer's chips hit 0 or below, the match ends instantly.
+      if (settlement.bankruptSeats.length > 0) room.round.matchOver = true;
       persistRoom(room);
       broadcastRoomState(room);
       broadcast(room, {
-        type: 'game_won', playerId: player.playerId, seat: player.seat, result, score, standings,
+        type: 'game_won', playerId: player.playerId, seat: player.seat, result, score,
+        standings: settlement.standings, bankruptSeats: settlement.bankruptSeats,
         round: room.round, matchOver: room.round.matchOver,
       });
       for (const p of room.players) {

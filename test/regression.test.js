@@ -36,14 +36,19 @@ describe('regression: kong replacement draw', () => {
   });
 });
 
-describe('regression: chow direction enforcement', () => {
-  test('a player cannot chow from a discarder who is not to their immediate right', () => {
+describe('regression: free-for-all chow (house rule)', () => {
+  test('any seat can chow from any discarder, not just the discarder\'s immediate right', () => {
     // seat order E -> S -> W -> N -> E
-    // S can chow from E (S is next after E). N cannot chow from E.
     const hand = ['2D', '3D'];
-    assert.ok(G.canChow(hand, '1D', 'S', 'E'));
-    assert.equal(G.canChow(hand, '1D', 'N', 'E'), false);
-    assert.equal(G.canChow(hand, '1D', 'W', 'E'), false);
+    assert.ok(G.canChow(hand, '1D', 'S', 'E'), 'S (next after E) can chow from E');
+    assert.ok(G.canChow(hand, '1D', 'N', 'E'), 'N can chow from E under free-for-all rule');
+    assert.ok(G.canChow(hand, '1D', 'W', 'E'), 'W can chow from E under free-for-all rule');
+  });
+
+  test('canChow still rejects hands that cannot form a run, regardless of seat', () => {
+    const hand = ['5D', '9B'];
+    const options = G.canChow(hand, '1D', 'N', 'E');
+    assert.equal(options.length, 0);
   });
 });
 
@@ -135,27 +140,112 @@ describe('regression: round and dealer progression', () => {
   });
 });
 
-describe('regression: score settlement', () => {
-  test('self-draw win collects fan points evenly from all three opponents', () => {
-    const room = G.createRoom('RR6', 'p1');
+describe('regression: fan → chip conversion table', () => {
+  test('matches the house rule table exactly, capping at 64 for 6+ fan', () => {
+    assert.equal(G.fanToChips(0), 1);
+    assert.equal(G.fanToChips(1), 2);
+    assert.equal(G.fanToChips(2), 4);
+    assert.equal(G.fanToChips(3), 8);
+    assert.equal(G.fanToChips(4), 16);
+    assert.equal(G.fanToChips(5), 32);
+    assert.equal(G.fanToChips(6), 64);
+    assert.equal(G.fanToChips(7), 64, 'fan above 6 stays capped at the 64-chip limit');
+    assert.equal(G.fanToChips(13), 64, 'limit hands (e.g. Thirteen Orphans) cap at 64');
+  });
+});
+
+describe('regression: chip settlement house rules', () => {
+  // Default room: dealerSeat 'E', dealerStreak 0. Players seated E/S/W/N.
+  function freshRoom(code) {
+    const room = G.createRoom(code, 'p1');
     ['p1','p2','p3','p4'].forEach((id,i) => G.addPlayer(room, { playerId: id, displayName: `P${i}` }));
-    G.settleScore(room, 'E', 2, { selfDraw: true });
-    const east = room.players.find(p => p.seat === 'E');
-    const others = room.players.filter(p => p.seat !== 'E');
-    assert.equal(east.score, 6);
-    others.forEach(p => assert.equal(p.score, -2));
+    return room;
+  }
+
+  test('self-draw win: all active players pay base chip value + 1 each (non-dealer winner)', () => {
+    const room = freshRoom('CH1');
+    // winner S is not the dealer (E is dealer) — no dealer-win doubling applies.
+    G.settleScore(room, 'S', 2, { selfDraw: true }); // fan 2 → base 4 chips
+    const south = room.players.find(p => p.seat === 'S');
+    const east = room.players.find(p => p.seat === 'E');   // dealer, pays double as a non-winning-dealer payer
+    const west = room.players.find(p => p.seat === 'W');
+    const north = room.players.find(p => p.seat === 'N');
+    assert.equal(west.score, -5, 'non-dealer opponent pays base(4) + 1');
+    assert.equal(north.score, -5, 'non-dealer opponent pays base(4) + 1');
+    assert.equal(east.score, -10, 'dealer pays double the standard amount when a non-dealer wins');
+    assert.equal(south.score, 20, 'winner collects the sum of all three payments');
   });
 
-  test('discard win charges the discarder double', () => {
-    const room = G.createRoom('RR7', 'p1');
-    ['p1','p2','p3','p4'].forEach((id,i) => G.addPlayer(room, { playerId: id, displayName: `P${i}` }));
-    G.settleScore(room, 'E', 3, { selfDraw: false, discarderSeat: 'S' });
-    const east = room.players.find(p => p.seat === 'E');
+  test('discard win: only the discarder pays, everyone else pays nothing', () => {
+    const room = freshRoom('CH2');
+    G.settleScore(room, 'S', 3, { selfDraw: false, discarderSeat: 'W' }); // fan 3 → base 8 chips
     const south = room.players.find(p => p.seat === 'S');
-    const others = room.players.filter(p => p.seat !== 'E' && p.seat !== 'S');
-    assert.equal(south.score, -6);
-    others.forEach(p => assert.equal(p.score, -3));
-    assert.equal(east.score, 6 + 3 + 3);
+    const east = room.players.find(p => p.seat === 'E');
+    const west = room.players.find(p => p.seat === 'W');
+    const north = room.players.find(p => p.seat === 'N');
+    assert.equal(west.score, -8, 'the discarder pays the full base amount');
+    assert.equal(east.score, 0, 'non-discarders pay nothing');
+    assert.equal(north.score, 0, 'non-discarders pay nothing');
+    assert.equal(south.score, 8);
+  });
+
+  test('discard win: dealer-as-discarder pays double when a non-dealer wins', () => {
+    const room = freshRoom('CH3');
+    G.settleScore(room, 'S', 1, { selfDraw: false, discarderSeat: 'E' }); // fan 1 → base 2 chips, E is dealer
+    const south = room.players.find(p => p.seat === 'S');
+    const east = room.players.find(p => p.seat === 'E');
+    assert.equal(east.score, -4, 'dealer discarder pays double the standard base amount');
+    assert.equal(south.score, 4);
+  });
+
+  test('dealer win: total payout received is doubled (first win, no streak yet)', () => {
+    const room = freshRoom('CH4');
+    G.settleScore(room, 'E', 2, { selfDraw: true }); // fan 2 → base 4, dealer wins self-draw
+    const east = room.players.find(p => p.seat === 'E');
+    const others = room.players.filter(p => p.seat !== 'E');
+    // (base + 1) * 2 [dealer-win double] * 1 [streak multiplier, first win] = 10 per opponent
+    others.forEach(p => assert.equal(p.score, -10));
+    assert.equal(east.score, 30);
+  });
+
+  test('dealer win streak multiplies the payout further on consecutive wins', () => {
+    const room = freshRoom('CH5');
+    const firstGain = G.settleScore(room, 'E', 1, { selfDraw: true }).standings.find(s => s.seat === 'E').score;
+    G.advanceHand(room, { winnerSeat: 'E' }); // dealer retains seat, streak becomes 1
+    assert.equal(room.round.dealerStreak, 1);
+    const beforeSecond = room.players.find(p => p.seat === 'E').score;
+    G.settleScore(room, 'E', 1, { selfDraw: true }); // same fan again, now with streak multiplier x2
+    const afterSecond = room.players.find(p => p.seat === 'E').score;
+    const secondGain = afterSecond - beforeSecond;
+    // Per-opponent amount = (base 2 + 1) * 2[dealer-win double] * streakMultiplier, summed over 3 opponents.
+    assert.equal(firstGain, 18, 'first dealer win: (2+1)*2*1 = 6 per opponent x 3 = 18');
+    assert.equal(secondGain, 36, 'second consecutive win: (2+1)*2*2 = 12 per opponent x 3 = 36 (double the first)');
+  });
+
+  test('dealerStreak resets to 0 once the deal passes to a new dealer', () => {
+    const room = freshRoom('CH6');
+    G.advanceHand(room, { winnerSeat: 'E' }); // dealer win, streak -> 1
+    assert.equal(room.round.dealerStreak, 1);
+    G.advanceHand(room, { winnerSeat: 'S' }); // non-dealer wins, deal passes to S
+    assert.equal(room.round.dealerStreak, 0, 'streak resets when a new player becomes dealer');
+  });
+
+  test('bankruptcy: settleScore flags any payer whose chips hit 0 or below', () => {
+    const room = freshRoom('CH7');
+    const west = room.players.find(p => p.seat === 'W');
+    west.score = 5; // West is nearly broke
+    const settlement = G.settleScore(room, 'S', 3, { selfDraw: false, discarderSeat: 'W' }); // base 8 > 5
+    assert.ok(settlement.bankruptSeats.includes('W'), 'West should be flagged bankrupt after paying more than they had');
+    assert.ok(west.score <= 0);
+  });
+
+  test('bankruptcy is not flagged for players who still have chips left', () => {
+    const room = freshRoom('CH8');
+    const west = room.players.find(p => p.seat === 'W');
+    west.score = 500; // plenty of chips
+    const settlement = G.settleScore(room, 'S', 1, { selfDraw: false, discarderSeat: 'W' }); // base 2, well within balance
+    assert.equal(settlement.bankruptSeats.length, 0);
+    assert.ok(west.score > 0);
   });
 });
 

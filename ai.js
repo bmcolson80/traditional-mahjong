@@ -1,7 +1,7 @@
 // ai.js — Mahjong AI decision engine
 // All logic is pure (no side effects, no I/O) so it can be unit-tested without a server.
 
-import { checkWin, isHonorTile, isBonusTile, nextSeat } from './game.js';
+import { checkWin, isHonorTile, isBonusTile } from './game.js';
 
 // Think time ranges in ms. Master plays faster (more decisive), Rookie takes longer.
 export const THINK_TIME = {
@@ -119,8 +119,9 @@ export function shouldClaimPung(hand, tile, exposed, skill) {
 }
 
 // Should AI claim a chow from the discard pile?
+// House rule: free-for-all chow — any seat may claim from any discarder, so no
+// direction check here (claimerSeat/discarderSeat kept for signature compatibility).
 export function shouldClaimChow(hand, tile, exposed, skill, claimerSeat, discarderSeat) {
-  if (nextSeat(discarderSeat) !== claimerSeat) return false; // not allowed
   if (skill === 'rookie')  return Math.random() < 0.30;
   if (skill === 'veteran') return Math.random() < 0.65;
   // Master: chow only if it clearly improves the hand
