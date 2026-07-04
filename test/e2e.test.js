@@ -183,4 +183,40 @@ describe('WebSocket game flow', () => {
     assert.ok(err.message);
     ws.close();
   });
+
+  test('host can abandon the game, ending it for every player at the table', async () => {
+    const sockets = [];
+    for (let i = 0; i < 3; i++) sockets.push(await connect());
+
+    const createPromise = waitForMessage(sockets[0], m => m.type === 'room_created');
+    sockets[0].send(JSON.stringify({ type: 'create_room', playerId: 'abandon-p0', displayName: 'Host' }));
+    const created = await createPromise;
+    const roomCode = created.roomCode;
+
+    for (let i = 1; i < 3; i++) {
+      const joinPromise = waitForMessage(sockets[i], m => m.type === 'room_joined');
+      sockets[i].send(JSON.stringify({ type: 'join_room', roomCode, playerId: `abandon-p${i}`, displayName: `P${i}` }));
+      await joinPromise;
+    }
+
+    // A non-host trying to end the game should be rejected.
+    const rejectPromise = waitForMessage(sockets[1], m => m.type === 'error');
+    sockets[1].send(JSON.stringify({ type: 'abandon_game' }));
+    const rejected = await rejectPromise;
+    assert.match(rejected.message, /Only the host/);
+
+    // The host ending it broadcasts game_abandoned to everyone at the table, including themself.
+    const abandonedPromises = sockets.map(s => waitForMessage(s, m => m.type === 'game_abandoned'));
+    sockets[0].send(JSON.stringify({ type: 'abandon_game' }));
+    const abandonedMsgs = await Promise.all(abandonedPromises);
+    for (const msg of abandonedMsgs) assert.equal(msg.roomCode, roomCode);
+
+    // The room should be gone — a late join attempt should fail with "Room not found".
+    const notFoundPromise = waitForMessage(sockets[0], m => m.type === 'error');
+    sockets[0].send(JSON.stringify({ type: 'add_ai', roomCode, skill: 'rookie' }));
+    const notFound = await notFoundPromise;
+    assert.match(notFound.message, /Room not found/);
+
+    sockets.forEach(s => s.close());
+  });
 });

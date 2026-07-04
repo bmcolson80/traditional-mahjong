@@ -578,6 +578,17 @@ function handleMessage(ws, msg) {
   const meta = clients.get(ws);
 
   switch (msg.type) {
+    case 'abandon_game': {
+      const room = rooms.get(meta.roomCode);
+      if (!room) return send(ws, { type: 'error', message: 'Room not found' });
+      if (room.hostPlayerId !== meta.playerId) return send(ws, { type: 'error', message: 'Only the host can end the game' });
+      clearAiTimeout(room);
+      room.phase = 'ended';
+      persistRoom(room);
+      broadcast(room, { type: 'game_abandoned', roomCode: room.code });
+      rooms.delete(room.code);
+      break;
+    }
     case 'create_room': {
       const roomCode = genRoomCode();
       const playerId = msg.playerId ?? randomUUID();
