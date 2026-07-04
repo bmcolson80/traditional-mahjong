@@ -816,8 +816,28 @@ function handleMessage(ws, msg) {
       const selfDraw = !room.currentDiscard || room.currentDiscard.fromSeat === player.seat;
       const winningTile = selfDraw ? player.hand[player.hand.length - 1] : room.currentDiscard.tile;
       const handForCheck = selfDraw ? player.hand.slice(0, -1) : player.hand;
+      const expectedLen = 13 - player.exposed.length * 3;
+      if (handForCheck.length !== expectedLen) {
+        console.error('declare_win: unexpected hand size', {
+          handLen: handForCheck.length, expectedLen, exposedCount: player.exposed.length,
+          hand: [...handForCheck].sort(),
+        });
+        throw new Error(`Hand has ${handForCheck.length} tiles (plus winning tile), expected ${expectedLen} — this is a bug, please report it with this exact message`);
+      }
       const result = G.checkWin(handForCheck, player.exposed, winningTile);
-      if (!result.win) throw new Error('Hand does not qualify for Mahjong');
+      if (!result.win) {
+        // Log full detail server-side and echo a compact version to the client so a
+        // "why didn't this work" report comes with exact ground truth instead of a screenshot guess.
+        const detail = {
+          selfDraw, winningTile,
+          hand: [...handForCheck].sort(),
+          exposed: player.exposed.map(s => ({ type: s.type, tiles: s.tiles })),
+          currentDiscard: room.currentDiscard,
+        };
+        console.error('declare_win rejected:', JSON.stringify(detail));
+        throw new Error('Hand does not qualify for Mahjong — hand: [' + detail.hand.join(',') +
+          '] + winning tile ' + winningTile + (player.exposed.length ? ', exposed: ' + JSON.stringify(detail.exposed) : ''));
+      }
       const roundWind = G.getRoundWind(room);
       const seatWind = G.getSeatWind(room, player.seat);
       const score = G.scoreHand(player, player.exposed, handForCheck, winningTile, {

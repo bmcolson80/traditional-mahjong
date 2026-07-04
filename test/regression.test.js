@@ -511,3 +511,26 @@ describe('regression: currentDiscard must not outlive a draw', () => {
     assert.equal(result.win, false, 'checking against the wrong winning tile incorrectly fails a valid hand');
   });
 });
+
+describe('regression: declare_win tile-count guard holds even with a kong exposed', () => {
+  test('expectedLen formula (13 - exposed.length*3) is correct even though a kong holds 4 tiles, not 3', () => {
+    // A kong is stored as ONE exposed-set entry with 4 tiles, but the extra tile is
+    // exactly offset by the extra replacement draw a kong grants — so counting exposed
+    // *sets* (not exposed *tiles*) is the right formula regardless of kongs on the table.
+    const room = G.createRoom('KONGCOUNT', 'p1');
+    ['p1','p2','p3','p4'].forEach((id,i) => G.addPlayer(room, { playerId: id, displayName: `P${i}` }));
+    G.startGame(room);
+    const player = room.players.find(p => p.seat === 'E');
+
+    // Give the player a concealed kong of a tile they don't otherwise need, then top up
+    // their hand to a normal pre-win count so the shape matches a real mid-game hand.
+    player.hand = ['2D','2D','2D','2D', ...player.hand.slice(0, 10)];
+    G.applyKong(room, player, '2D', player.seat, true); // concealed kong, draws a replacement tile itself
+
+    const expectedLen = 13 - player.exposed.length * 3;
+    // After the kong, hand should sit at exactly expectedLen + 1 (the +1 being the tile
+    // they'd remove as "winningTile" if they were declaring right now).
+    assert.equal(player.hand.length, expectedLen + 1,
+      'hand size after a kong should still satisfy the 13 - exposed.length*3 (+1 pending) formula');
+  });
+});
