@@ -729,6 +729,7 @@ function handleMessage(ws, msg) {
     case 'discard': {
       const room = requireRoom(meta);
       const player = requirePlayer(room, meta.playerId);
+      if (room.phase !== 'playing') throw new Error('This hand is no longer in progress');
       if (room.turnSeat !== player.seat) throw new Error('Not your turn');
       G.discardTile(room, player, msg.tile);
       room.turnSeat = G.nextSeat(player.seat, room.players.map(p => p.seat));
@@ -741,7 +742,14 @@ function handleMessage(ws, msg) {
     case 'draw': {
       const room = requireRoom(meta);
       const player = requirePlayer(room, meta.playerId);
+      if (room.phase !== 'playing') throw new Error('This hand is no longer in progress');
       if (room.turnSeat !== player.seat) throw new Error('Not your turn');
+      // Authoritative guard: a player can only draw when their hand is at a
+      // "needs to draw" count (13, 10, 7, 4, 1 — i.e. length % 3 === 1). If a
+      // double-tap or retry sends 'draw' twice, the second one lands here with
+      // a 14/11/8/5/2-tile hand and gets rejected instead of silently granting
+      // an extra tile (which previously broke self-draw win detection).
+      if (player.hand.length % 3 !== 1) throw new Error('You already drew this turn — discard or declare first');
       clearAiTimeout(room); // human is taking action, cancel any pending AI
       const tile = G.drawTile(room, player);
       if (!tile) {
@@ -758,6 +766,7 @@ function handleMessage(ws, msg) {
     }
     case 'claim_pung': {
       const room = requireRoom(meta);
+      if (room.phase !== 'playing') throw new Error('This hand is no longer in progress');
       clearAiTimeout(room); // human beat the AI to the claim
       const player = requirePlayer(room, meta.playerId);
       if (!room.currentDiscard) throw new Error('No discard to claim');
@@ -772,6 +781,7 @@ function handleMessage(ws, msg) {
     }
     case 'claim_kong': {
       const room = requireRoom(meta);
+      if (room.phase !== 'playing') throw new Error('This hand is no longer in progress');
       clearAiTimeout(room);
       const player = requirePlayer(room, meta.playerId);
       const concealed = Boolean(msg.concealed);
@@ -792,6 +802,7 @@ function handleMessage(ws, msg) {
     }
     case 'claim_chow': {
       const room = requireRoom(meta);
+      if (room.phase !== 'playing') throw new Error('This hand is no longer in progress');
       clearAiTimeout(room);
       const player = requirePlayer(room, meta.playerId);
       if (!room.currentDiscard) throw new Error('No discard to claim');
@@ -811,6 +822,7 @@ function handleMessage(ws, msg) {
     }
     case 'declare_win': {
       const room = requireRoom(meta);
+      if (room.phase !== 'playing') throw new Error('This hand is no longer in progress');
       clearAiTimeout(room);
       const player = requirePlayer(room, meta.playerId);
       const selfDraw = !room.currentDiscard || room.currentDiscard.fromSeat === player.seat;

@@ -1348,6 +1348,18 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     bar.innerHTML = '';
     if (!me) return;
 
+    // Guards against double-fire: the moment ANY button in this bar is clicked,
+    // every button in the bar is disabled immediately (synchronously, before the
+    // WS round-trip), so a fast double-tap's second event lands on a disabled
+    // button instead of sending the same action twice. The bar rebuilds fresh
+    // (with fresh, enabled buttons) on the next room_state broadcast regardless.
+    function guardedSend(msg) {
+      if (bar.dataset.actionTaken) return;
+      bar.dataset.actionTaken = '1';
+      Array.from(bar.querySelectorAll('button')).forEach(b => { b.disabled = true; });
+      wsSend(msg);
+    }
+
     if (room.phase === 'finished') {
       if (room.round?.matchOver) {
         const doneMsg = document.createElement('div');
@@ -1369,7 +1381,7 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
       } else {
         const nextBtn = document.createElement('button');
         nextBtn.textContent = 'Start Next Hand';
-        nextBtn.addEventListener('click', () => wsSend({ type: 'next_hand' }));
+        nextBtn.addEventListener('click', () => guardedSend({ type: 'next_hand' }));
         bar.appendChild(nextBtn);
       }
       return;
@@ -1394,15 +1406,16 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
       discardBtn.textContent = state.selectedTile ? `Discard ${formatTile(state.selectedTile)}` : 'Select a tile to discard';
       discardBtn.disabled = !state.selectedTile;
       discardBtn.addEventListener('click', () => {
-        wsSend({ type: 'discard', tile: state.selectedTile });
+        const tile = state.selectedTile;
         state.selectedTile = null;
+        guardedSend({ type: 'discard', tile });
       });
       bar.appendChild(discardBtn);
 
       const winBtn = document.createElement('button');
       winBtn.className = 'secondary';
       winBtn.textContent = 'Declare Mahjong';
-      winBtn.addEventListener('click', () => wsSend({ type: 'declare_win' }));
+      winBtn.addEventListener('click', () => guardedSend({ type: 'declare_win' }));
       bar.appendChild(winBtn);
       return;
     }
@@ -1411,32 +1424,32 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
       const pungBtn = document.createElement('button');
       pungBtn.className = 'secondary';
       pungBtn.textContent = 'Pung';
-      pungBtn.addEventListener('click', () => wsSend({ type: 'claim_pung' }));
+      pungBtn.addEventListener('click', () => guardedSend({ type: 'claim_pung' }));
       bar.appendChild(pungBtn);
 
       const kongBtn = document.createElement('button');
       kongBtn.className = 'secondary';
       kongBtn.textContent = 'Kong';
-      kongBtn.addEventListener('click', () => wsSend({ type: 'claim_kong' }));
+      kongBtn.addEventListener('click', () => guardedSend({ type: 'claim_kong' }));
       bar.appendChild(kongBtn);
 
       const chowBtn = document.createElement('button');
       chowBtn.className = 'secondary';
       chowBtn.textContent = 'Chow';
-      chowBtn.addEventListener('click', () => wsSend({ type: 'claim_chow' }));
+      chowBtn.addEventListener('click', () => guardedSend({ type: 'claim_chow' }));
       bar.appendChild(chowBtn);
 
       const winBtn = document.createElement('button');
       winBtn.className = 'secondary';
       winBtn.textContent = 'Declare Mahjong';
-      winBtn.addEventListener('click', () => wsSend({ type: 'declare_win' }));
+      winBtn.addEventListener('click', () => guardedSend({ type: 'declare_win' }));
       bar.appendChild(winBtn);
     }
 
     if (isMyTurn && needsToDraw) {
       const drawBtn = document.createElement('button');
       drawBtn.textContent = 'Draw Tile';
-      drawBtn.addEventListener('click', () => wsSend({ type: 'draw' }));
+      drawBtn.addEventListener('click', () => guardedSend({ type: 'draw' }));
       bar.appendChild(drawBtn);
     }
   }

@@ -7,7 +7,7 @@ process.env.DB_PATH = './test/e2e-test.db';
 process.env.PORT = '3901';
 process.env.JWT_SECRET = 'test-secret';
 
-const { startServer, server } = await import('../server.js');
+const { startServer, server, rooms } = await import('../server.js');
 
 let baseUrl;
 
@@ -216,6 +216,54 @@ describe('WebSocket game flow', () => {
     sockets[0].send(JSON.stringify({ type: 'add_ai', roomCode, skill: 'rookie' }));
     const notFound = await notFoundPromise;
     assert.match(notFound.message, /Room not found/);
+
+    sockets.forEach(s => s.close());
+  });
+
+  test('a rapid double-fire "draw" (e.g. a double-tap before the UI updates) does not grant an extra tile', async () => {
+    const sockets = [];
+    for (let i = 0; i < 4; i++) sockets.push(await connect());
+
+    const createPromise = waitForMessage(sockets[0], m => m.type === 'room_created');
+    sockets[0].send(JSON.stringify({ type: 'create_room', playerId: 'dbl-p0', displayName: 'P0' }));
+    const created = await createPromise;
+    const roomCode = created.roomCode;
+
+    for (let i = 1; i < 4; i++) {
+      const joinPromise = waitForMessage(sockets[i], m => m.type === 'room_state');
+      sockets[i].send(JSON.stringify({ type: 'join_room', roomCode, playerId: `dbl-p${i}`, displayName: `P${i}` }));
+      await joinPromise;
+    }
+    // Room auto-starts once the 4th player joins.
+    await waitForMessage(sockets[0], m => m.type === 'game_started');
+
+    const room = rooms.get(roomCode);
+    const dealer = room.players.find(p => p.seat === room.round.dealerSeat);
+    const dealerSocket = sockets[room.players.indexOf(dealer)];
+
+    // Dealer discards, handing the "needs to draw" turn to the next seat.
+    const discardTile = dealer.hand[0];
+    const dealerDiscardAck = waitForMessage(dealerSocket, m => m.type === 'room_state');
+    dealerSocket.send(JSON.stringify({ type: 'discard', tile: discardTile }));
+    await dealerDiscardAck;
+
+    const nextSeat = room.turnSeat;
+    const nextPlayer = room.players.find(p => p.seat === nextSeat);
+    const nextSocket = sockets[room.players.indexOf(nextPlayer)];
+    assert.equal(nextPlayer.hand.length % 3, 1, 'next player should be in a "needs to draw" state');
+
+    // Fire 'draw' twice back-to-back, exactly like a fast double-tap would, before
+    // either response comes back.
+    const firstAck = waitForMessage(nextSocket, m => m.type === 'room_state');
+    const secondError = waitForMessage(nextSocket, m => m.type === 'error');
+    nextSocket.send(JSON.stringify({ type: 'draw' }));
+    nextSocket.send(JSON.stringify({ type: 'draw' }));
+    await firstAck;
+    const err = await secondError;
+    assert.match(err.message, /already drew/);
+
+    const finalHandLen = room.players.find(p => p.seat === nextSeat).hand.length;
+    assert.equal(finalHandLen, 14, 'the second draw must be rejected — hand should have exactly 14 tiles, not 15');
 
     sockets.forEach(s => s.close());
   });
