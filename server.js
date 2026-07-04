@@ -899,7 +899,15 @@ function handleMessage(ws, msg) {
       );
       if (!player) return send(ws, { type: 'error', message: 'You are not in this game' });
       // Refresh the playerId in case the browser generated a new one after restart
-      if (msg.playerId) player.playerId = msg.playerId;
+      // (cleared storage, reinstalled, private browsing, etc). If this player was
+      // the host under their OLD playerId, carry hostPlayerId forward too —
+      // otherwise host status silently breaks on reconnect: the End Game button
+      // (and everything else gated on isHost) disappears even though it's genuinely
+      // still their room, just recognized under a new local ID now.
+      if (msg.playerId && msg.playerId !== player.playerId) {
+        if (room.hostPlayerId === player.playerId) room.hostPlayerId = msg.playerId;
+        player.playerId = msg.playerId;
+      }
       clients.set(ws, {
         roomCode: room.code,
         playerId: player.playerId,
@@ -910,6 +918,7 @@ function handleMessage(ws, msg) {
       broadcastRoomState(room);
       // Resume AI scheduling if the game is mid-play
       if (room.phase === 'playing') scheduleAiTurn(room);
+      persistRoom(room);
       break;
     }
     default:

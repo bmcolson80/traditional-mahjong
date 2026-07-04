@@ -162,6 +162,29 @@ describe('WebSocket game flow', () => {
     ws2.close();
   });
 
+  test('host rejoining with a NEW local playerId (cleared storage, private browsing, reinstall) keeps host status', async () => {
+    const ws1 = await connect();
+    const createdP = waitForMessage(ws1, m => m.type === 'room_created');
+    ws1.send(JSON.stringify({ type: 'create_room', playerId: 'orig-pid', userId: 777, displayName: 'Host' }));
+    const { roomCode } = await createdP;
+    ws1.close();
+    await new Promise(r => setTimeout(r, 50));
+
+    // Reconnect as the SAME account (same userId) but with a brand-new local playerId —
+    // exactly what happens after clearing browser storage, reinstalling, or a private tab.
+    const ws2 = await connect();
+    const joinedP = waitForMessage(ws2, m => m.type === 'room_joined');
+    const stateP = waitForMessage(ws2, m => m.type === 'room_state');
+    ws2.send(JSON.stringify({ type: 'rejoin_room', roomCode, playerId: 'brand-new-pid', userId: 777 }));
+    await joinedP;
+    const state = await stateP;
+
+    assert.equal(state.room.hostPlayerId, 'brand-new-pid',
+      'hostPlayerId must be carried forward to the new local playerId, or the host silently loses ' +
+      'access to host-only controls (End Game, Start Game, Add AI) despite still owning the room');
+    ws2.close();
+  });
+
   test('invalid message type returns an error, not a crash', async () => {
     const ws = await connect();
     const errPromise = waitForMessage(ws, m => m.type === 'error');
