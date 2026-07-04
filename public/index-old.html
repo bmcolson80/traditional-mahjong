@@ -331,7 +331,6 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
       </div>
       <button class="btn btn-primary" id="startGameBtn" style="display:none">Start Game</button>
       <button class="btn btn-secondary" id="leaveWaitingBtn">Leave Room</button>
-      <button class="btn btn-danger" id="abandonWaitingBtn" style="display:none">⚠ End Game For Everyone</button>
     </div>
   </div>
 </div>
@@ -785,10 +784,6 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     const startBtn = document.getElementById('startGameBtn');
     const canStart = state.isHost && total >= 2;
     startBtn.style.display = canStart ? '' : 'none';
-
-    // End Game (host only) — lets the host cancel/close the room before it even starts,
-    // same abandon_game flow used once a hand is in progress.
-    document.getElementById('abandonWaitingBtn').style.display = state.isHost ? '' : 'none';
   }
 
   // ---------- Game rendering ----------
@@ -1432,9 +1427,6 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
 
   // End Game (host only) — permanently ends the match for everyone at the table
   document.getElementById('abandonBtn').addEventListener('click', () => {
-    document.getElementById('abandonOverlay').classList.add('active');
-  });
-  document.getElementById('abandonWaitingBtn').addEventListener('click', () => {
     document.getElementById('abandonOverlay').classList.add('active');
   });
   document.getElementById('abandonCancelBtn').addEventListener('click', () => {
