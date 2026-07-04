@@ -357,14 +357,14 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
 
       <div class="wall-col wall-left" id="wallLeft"></div>
       <div class="play-center">
+        <div class="game-section">
+          <div class="game-section-title">EXPOSED SETS</div>
+          <div id="allExposedSets"></div>
+        </div>
         <div class="game-section discard-area">
           <div class="game-section-title">DISCARD</div>
           <div id="currentDiscardLabel" style="font-size:11px;color:rgba(255,255,255,.5);letter-spacing:1px;margin-bottom:4px"></div>
           <div class="discard-tile" id="currentDiscardTile"></div>
-        </div>
-        <div class="game-section">
-          <div class="game-section-title">EXPOSED SETS</div>
-          <div id="allExposedSets"></div>
         </div>
         <div class="wall-count-label" id="wallCountLabel"></div>
       </div>
@@ -375,6 +375,8 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
       <div class="corner-stud"></div>
     </div>
 
+    <div class="action-bar" id="actionBar"></div>
+
     <div class="game-section">
       <div class="game-section-title">YOUR HAND <span class="hand-hint">· drag to rearrange</span></div>
       <div class="rack">
@@ -382,8 +384,6 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
       </div>
     </div>
   </div>
-
-  <div class="action-bar" id="actionBar"></div>
 </div>
 
 <!-- Toast notification -->
@@ -1377,30 +1377,37 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
 
     if (room.phase !== 'playing') return;
 
-    if (isMyTurn) {
-      if (me.hand.length % 3 === 1) {
-        // 13 tiles (or 10/7 after claims) → needs to draw
-        const drawBtn = document.createElement('button');
-        drawBtn.textContent = 'Draw Tile';
-        drawBtn.addEventListener('click', () => wsSend({ type: 'draw' }));
-        bar.appendChild(drawBtn);
-      } else {
-        const discardBtn = document.createElement('button');
-        discardBtn.textContent = state.selectedTile ? `Discard ${formatTile(state.selectedTile)}` : 'Select a tile to discard';
-        discardBtn.disabled = !state.selectedTile;
-        discardBtn.addEventListener('click', () => {
-          wsSend({ type: 'discard', tile: state.selectedTile });
-          state.selectedTile = null;
-        });
-        bar.appendChild(discardBtn);
+    // room.turnSeat advances to the next player the instant a discard happens
+    // (see server.js), so "isMyTurn" becomes true for that next player right
+    // away — even during the brief window everyone still has to claim
+    // pung/kong/chow on the tile that was just discarded. So claim eligibility
+    // is its own check, independent of whose turn it nominally is: anyone but
+    // the discarder can claim, and the next player additionally gets the
+    // option to just draw normally instead.
+    const iAmDiscarder = room.currentDiscard && room.currentDiscard.fromSeat === state.mySeat;
+    const canClaim = Boolean(room.currentDiscard) && !iAmDiscarder;
+    const needsToDraw = me.hand.length % 3 === 1;
 
-        const winBtn = document.createElement('button');
-        winBtn.className = 'secondary';
-        winBtn.textContent = 'Declare Mahjong';
-        winBtn.addEventListener('click', () => wsSend({ type: 'declare_win' }));
-        bar.appendChild(winBtn);
-      }
-    } else if (room.currentDiscard) {
+    if (isMyTurn && !needsToDraw) {
+      // Already drew (or claimed) this turn — decide what to discard.
+      const discardBtn = document.createElement('button');
+      discardBtn.textContent = state.selectedTile ? `Discard ${formatTile(state.selectedTile)}` : 'Select a tile to discard';
+      discardBtn.disabled = !state.selectedTile;
+      discardBtn.addEventListener('click', () => {
+        wsSend({ type: 'discard', tile: state.selectedTile });
+        state.selectedTile = null;
+      });
+      bar.appendChild(discardBtn);
+
+      const winBtn = document.createElement('button');
+      winBtn.className = 'secondary';
+      winBtn.textContent = 'Declare Mahjong';
+      winBtn.addEventListener('click', () => wsSend({ type: 'declare_win' }));
+      bar.appendChild(winBtn);
+      return;
+    }
+
+    if (canClaim) {
       const pungBtn = document.createElement('button');
       pungBtn.className = 'secondary';
       pungBtn.textContent = 'Pung';
@@ -1420,9 +1427,17 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
       bar.appendChild(chowBtn);
 
       const winBtn = document.createElement('button');
+      winBtn.className = 'secondary';
       winBtn.textContent = 'Declare Mahjong';
       winBtn.addEventListener('click', () => wsSend({ type: 'declare_win' }));
       bar.appendChild(winBtn);
+    }
+
+    if (isMyTurn && needsToDraw) {
+      const drawBtn = document.createElement('button');
+      drawBtn.textContent = 'Draw Tile';
+      drawBtn.addEventListener('click', () => wsSend({ type: 'draw' }));
+      bar.appendChild(drawBtn);
     }
   }
 

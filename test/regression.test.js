@@ -465,3 +465,49 @@ describe('regression: tile count integrity', () => {
     assert.equal(tileCount, 144, 'Total tiles should always be 144');
   });
 });
+
+describe('regression: currentDiscard must not outlive a draw', () => {
+  test('drawTile clears any pending currentDiscard from an earlier turn', () => {
+    const room = G.createRoom('CD1', 'p1');
+    ['p1','p2','p3','p4'].forEach((id,i) => G.addPlayer(room, { playerId: id, displayName: `P${i}` }));
+    G.startGame(room);
+
+    // Simulate a discard nobody claimed, then the next player drawing normally.
+    room.currentDiscard = { tile: '4C', fromSeat: 'S' };
+    const player = room.players.find(p => p.seat === 'E');
+    G.drawTile(room, player);
+
+    assert.equal(room.currentDiscard, null,
+      'currentDiscard must be cleared the moment anyone draws — otherwise it stays ' +
+      'claimable after the window has closed, and self-draw win checks below get ' +
+      'confused about whether the winning tile came from a claim or the wall');
+  });
+
+  test('a fully self-drawn winning hand is recognized as a win once currentDiscard is cleared', () => {
+    // Same 14-tile concealed hand shape reported as a false-negative in production:
+    // GD pair + 9C triplet + 1-2-3B run + 5-6-7B run + 1D triplet.
+    const hand14 = ['GD','GD','9C','9C','9C','1B','2B','3B','5B','6B','7B','1D','1D','1D'];
+    const currentDiscard = null; // cleared by drawTile, as it should be for a real self-draw
+    const player = { seat: 'E', hand: hand14, exposed: [] };
+    const selfDraw = !currentDiscard || currentDiscard.fromSeat === player.seat;
+    const winningTile = selfDraw ? player.hand[player.hand.length - 1] : currentDiscard.tile;
+    const handForCheck = selfDraw ? player.hand.slice(0, -1) : player.hand;
+
+    assert.equal(selfDraw, true);
+    const result = G.checkWin(handForCheck, player.exposed, winningTile);
+    assert.equal(result.win, true, 'A valid 4-sets-plus-pair concealed hand must be recognized as a win');
+  });
+
+  test('a stale currentDiscard from another seat produces a false negative (documents the bug this fixes)', () => {
+    const hand14 = ['GD','GD','9C','9C','9C','1B','2B','3B','5B','6B','7B','1D','1D','1D'];
+    const staleDiscard = { tile: '4C', fromSeat: 'S' }; // left over from an earlier, unrelated turn
+    const player = { seat: 'E', hand: hand14, exposed: [] };
+    const selfDraw = !staleDiscard || staleDiscard.fromSeat === player.seat;
+    const winningTile = selfDraw ? player.hand[player.hand.length - 1] : staleDiscard.tile;
+    const handForCheck = selfDraw ? player.hand.slice(0, -1) : player.hand;
+
+    assert.equal(selfDraw, false, 'stale discard incorrectly looks like a claim from another seat');
+    const result = G.checkWin(handForCheck, player.exposed, winningTile);
+    assert.equal(result.win, false, 'checking against the wrong winning tile incorrectly fails a valid hand');
+  });
+});

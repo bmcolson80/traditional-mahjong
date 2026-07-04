@@ -261,6 +261,7 @@ function replaceBonusTiles(player, live, deadWall) {
 
 export function drawTile(room, player) {
   if (room.wall.length === 0) return null;
+  room.currentDiscard = null;
   let tile = room.wall.shift();
   player.hand.push(tile);
   // auto-replace bonus tiles on draw
