@@ -521,12 +521,12 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
   function renderActiveGames(games) {
     const section = document.getElementById('activeGamesSection');
     const list = document.getElementById('activeGamesList');
+    list.innerHTML = '';
     if (!games || games.length === 0) {
       section.style.display = 'none';
       return;
     }
     section.style.display = '';
-    list.innerHTML = '';
     const SEAT_COLORS = { E: '#c9a227', S: '#4eb8c8', W: '#c94040', N: '#7ec864' };
     for (const game of games) {
       const card = document.createElement('div');
@@ -573,6 +573,24 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
         }, 150);
       });
       card.appendChild(btn);
+      if (game.isHost) {
+        const endBtn = document.createElement('button');
+        endBtn.className = 'btn btn-danger btn-sm';
+        endBtn.textContent = 'End';
+        endBtn.style.margin = '0';
+        endBtn.addEventListener('click', async function () {
+          if (!confirm('End game ' + roomCode + ' for everyone? This cannot be undone.')) return;
+          endBtn.disabled = true;
+          try {
+            await apiCall('/api/games/' + roomCode + '/end', { method: 'POST' });
+            await loadActiveGames();
+          } catch (err) {
+            showToast(err.message || 'Failed to end game');
+            endBtn.disabled = false;
+          }
+        });
+        card.appendChild(endBtn);
+      }
       list.appendChild(card);
     }
   }

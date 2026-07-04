@@ -226,7 +226,7 @@ app.get('/api/push/status', requireAuth, (req, res) => {
 app.get('/api/my-games', requireAuth, (req, res) => {
   try {
     const rows = all(
-      `SELECT DISTINCT g.room_code, g.phase, g.state_json
+      `SELECT DISTINCT g.room_code, g.phase, g.state_json, gp.player_id
        FROM games g
        JOIN game_players gp ON gp.game_id = g.id
        WHERE gp.user_id = ? AND g.phase IN ('waiting','playing')
@@ -242,6 +242,7 @@ app.get('/api/my-games', requireAuth, (req, res) => {
           roundWind: s.round ? ['East','South','West','North'][s.round.windIndex ?? 0] : 'East',
           handNumber: s.round?.handNumber ?? 1,
           turnSeat: s.turnSeat,
+          isHost: s.hostPlayerId === row.player_id,
           players: (s.players ?? []).map(p => ({
             displayName: p.displayName,
             seat: p.seat,
@@ -255,6 +256,38 @@ app.get('/api/my-games', requireAuth, (req, res) => {
   } catch (err) {
     console.error('my-games error:', err);
     res.status(500).json({ error: 'Failed to load games' });
+  }
+});
+
+// Lets the host end one of their games straight from the dashboard list — no
+// need to rejoin first. Works whether or not the room is currently loaded in
+// memory (e.g. after a server restart, it's restored lazily from the DB here).
+app.post('/api/games/:roomCode/end', requireAuth, (req, res) => {
+  try {
+    const { roomCode } = req.params;
+    const gpRow = get(
+      `SELECT gp.player_id FROM game_players gp
+       JOIN games g ON g.id = gp.game_id
+       WHERE g.room_code = ? AND gp.user_id = ?`,
+      [roomCode, req.user.id]
+    );
+    if (!gpRow) return res.status(404).json({ error: 'Game not found' });
+
+    let room = rooms.get(roomCode);
+    if (!room) {
+      const gameRow = get('SELECT state_json, phase FROM games WHERE room_code = ?', [roomCode]);
+      if (!gameRow || gameRow.phase === 'ended') return res.status(404).json({ error: 'Game already ended' });
+      try { room = JSON.parse(gameRow.state_json); } catch { return res.status(500).json({ error: 'Corrupt game state' }); }
+    }
+    if (room.hostPlayerId !== gpRow.player_id) return res.status(403).json({ error: 'Only the host can end the game' });
+
+    if (rooms.has(roomCode)) endRoom(rooms.get(roomCode));
+    else { room.phase = 'ended'; persistRoom(room); }
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('end game (REST) error:', err);
+    res.status(500).json({ error: 'Failed to end game' });
   }
 });
 
@@ -574,6 +607,14 @@ function executeAiWin(room, player, selfDraw, winningTile, discarderSeat) {
   }
 }
 
+function endRoom(room) {
+  clearAiTimeout(room);
+  room.phase = 'ended';
+  persistRoom(room);
+  broadcast(room, { type: 'game_abandoned', roomCode: room.code });
+  rooms.delete(room.code);
+}
+
 function handleMessage(ws, msg) {
   const meta = clients.get(ws);
 
@@ -582,11 +623,7 @@ function handleMessage(ws, msg) {
       const room = rooms.get(meta.roomCode);
       if (!room) return send(ws, { type: 'error', message: 'Room not found' });
       if (room.hostPlayerId !== meta.playerId) return send(ws, { type: 'error', message: 'Only the host can end the game' });
-      clearAiTimeout(room);
-      room.phase = 'ended';
-      persistRoom(room);
-      broadcast(room, { type: 'game_abandoned', roomCode: room.code });
-      rooms.delete(room.code);
+      endRoom(room);
       break;
     }
     case 'create_room': {
