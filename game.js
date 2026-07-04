@@ -89,12 +89,18 @@ export function getSeatWind(room, physicalSeat) {
 
 // Call after a hand ends to advance dealer/round state for the next hand.
 // Dealer retains their seat (and the round wind stays the same) if the dealer
-// won or the hand was a draw — otherwise dealership passes to the next seat.
+// won or the hand was a draw — otherwise dealership passes to the next ACTIVE seat
+// (2/3-player games leave the remaining seat(s) physically empty — see room.players;
+// nextSeat is given the room's actual seated order so it skips any empty seat entirely).
 // dealerStreak (house rule): increments each time the dealer wins consecutively,
 // resets to 0 the moment the deal passes to someone else. A draw keeps the dealer
 // in their seat but does not itself count as a "win", so the streak is unaffected.
+// A Round ends once the deal has rotated through every ACTIVE player once — so a
+// 3-player round is 3 hands, not 4 — but the match is still always the same 4
+// Prevailing Winds (East/South/West/North Round) regardless of player count.
 export function advanceHand(room, { winnerSeat, isDraw = false } = {}) {
   if (room.round.dealerStreak === undefined) room.round.dealerStreak = 0; // back-compat for older persisted rooms
+  const activeSeats = room.players.map(p => p.seat); // e.g. ['E','S','W'] for a 3-player game
   const dealerRetains = isDraw || winnerSeat === room.round.dealerSeat;
 
   if (dealerRetains) {
@@ -103,9 +109,9 @@ export function advanceHand(room, { winnerSeat, isDraw = false } = {}) {
   }
 
   room.round.dealerStreak = 0;
-  room.round.dealerSeat = nextSeat(room.round.dealerSeat);
+  room.round.dealerSeat = nextSeat(room.round.dealerSeat, activeSeats);
   room.round.handNumber += 1;
-  if (room.round.handNumber > 4) {
+  if (room.round.handNumber > activeSeats.length) {
     room.round.handNumber = 1;
     room.round.windIndex = (room.round.windIndex + 1) % 4;
     if (room.round.windIndex === 0) {
@@ -124,13 +130,20 @@ export function fanToChips(fan) {
   return 2 ** fan;
 }
 
-// Chip settlement under the custom house rules:
+// Chip settlement under the custom house rules. Verified directly against the
+// rulebook's worked examples:
+//  Example 1 (discard win, 2 fan/4 chips): only the discarder pays the base value.
+//  Example 2 (dealer self-draw, 3 fan/8 chips): base DOUBLES to 16 for the dealer
+//    win, THEN the flat +1 self-draw bonus is added on top (16 + 1 = 17/opponent,
+//    34 total) — the +1 bonus is a flat per-payer add-on, NOT itself doubled.
 //  - Discard win: only the discarder pays the winner; everyone else pays nothing.
-//  - Self-draw win: every other active player pays base chip value + 1 extra chip.
-//  - Dealer wins: the total payout the dealer receives is doubled.
-//  - Non-dealer wins: the dealer (as a payer) pays double the standard chip value.
-//  - Dealer win streak: consecutive dealer wins multiply the payout further
-//    (1st win = x1, 2nd consecutive win = x2, 3rd = x3, ...), on top of the dealer-win double above.
+//  - Self-draw win: every other active player pays the base chip value, then a
+//    flat +1 extra chip each (added after any dealer/streak multiplier below).
+//  - Dealer wins: the base portion of the payout is doubled.
+//  - Non-dealer wins: the dealer (as a payer) pays double the base portion.
+//  - Dealer win streak: consecutive dealer wins multiply the base portion further
+//    (1st win = x1, 2nd consecutive win = x2, 3rd = x3, ...), same treatment as
+//    the dealer-win double above — the flat self-draw +1 is never scaled by this.
 //  - Bankruptcy: if any payer's chips hit 0 or below, `bankruptSeats` is returned
 //    non-empty so the caller can end the match immediately.
 export function settleScore(room, winnerSeat, fan, { selfDraw, discarderSeat } = {}) {
@@ -145,17 +158,20 @@ export function settleScore(room, winnerSeat, fan, { selfDraw, discarderSeat } =
   let winnerGain = 0;
   const bankruptSeats = [];
   for (const p of others) {
-    let amount = 0;
+    let raw = 0;
     if (selfDraw) {
-      amount = base + 1; // self-draw: all active players pay base + 1 extra chip each
+      raw = base; // self-draw: every active player owes the base value
     } else if (p.seat === discarderSeat) {
-      amount = base; // discard win: only the discarder pays
+      raw = base; // discard win: only the discarder owes anything
     }
 
-    if (amount > 0) {
-      if (!winnerIsDealer && p.seat === dealerSeat) amount *= 2; // non-dealer win: dealer pays double
-      if (winnerIsDealer) amount *= 2 * streakMultiplier; // dealer win: total doubled, plus win-streak multiplier
+    if (raw > 0) {
+      if (winnerIsDealer) raw *= 2 * streakMultiplier;   // dealer win: base doubled, plus win-streak multiplier
+      else if (p.seat === dealerSeat) raw *= 2;           // non-dealer win: dealer pays double the base
     }
+
+    // Flat +1 self-draw bonus is added AFTER doubling, never scaled by it (see Example 2 above).
+    const amount = (selfDraw && raw > 0) ? raw + 1 : raw;
 
     p.score -= amount;
     winnerGain += amount;
@@ -180,17 +196,19 @@ export function addPlayer(room, { playerId, userId, displayName }) {
 }
 
 export function startGame(room) {
-  if (room.players.length !== 4) throw new Error('Need exactly 4 players to start');
+  if (room.players.length < 2 || room.players.length > 4) throw new Error('Need 2-4 players to start');
   const wall = buildWall();
   room.deadWall = wall.slice(0, 14);
   let live = wall.slice(14);
 
-  // Starting chips (house rule): 500/player in a full 4-human table, 1000/player
-  // when AI has filled in for a 2 or 3 player game. Only assigned once per match —
-  // p.score is intentionally NOT reset on subsequent hands so chips carry across the match.
+  // Starting chips (house rule): 500/player for a full 4-player table, 1000/player
+  // for a 2 or 3 player game (chips concentrate faster with fewer players at the
+  // table, per the rulebook's "Fewer Player Adjustment" — this is about how many
+  // seats are actually occupied, not whether any of them are AI). Only assigned
+  // once per match — p.score is intentionally NOT reset on subsequent hands so
+  // chips carry across the match.
   if (!room.chipsInitialized) {
-    const humanCount = room.players.filter(p => !p.isAI).length;
-    const startingChips = humanCount <= 3 ? 1000 : 500;
+    const startingChips = room.players.length <= 3 ? 1000 : 500;
     for (const p of room.players) p.score = startingChips;
     room.chipsInitialized = true;
   }
@@ -259,9 +277,13 @@ export function discardTile(room, player, tile) {
   return tile;
 }
 
-export function nextSeat(seat) {
-  const i = SEAT_ORDER.indexOf(seat);
-  return SEAT_ORDER[(i + 1) % 4];
+// Returns the next seat after `seat`, cycling only through `activeSeats` (defaults to
+// the full 4-seat compass). Pass the room's actual seated order (room.players.map(p=>p.seat))
+// to correctly skip empty seats in a 2/3-player game — physical seat identity (E/S/W/N)
+// never changes, only which of those seats currently has someone in it.
+export function nextSeat(seat, activeSeats = SEAT_ORDER) {
+  const i = activeSeats.indexOf(seat);
+  return activeSeats[(i + 1) % activeSeats.length];
 }
 
 // ---------- Claims ----------

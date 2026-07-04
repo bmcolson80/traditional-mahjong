@@ -42,24 +42,77 @@ describe('room lifecycle', () => {
   });
 });
 
+describe('2/3-player games (rulebook: leave remaining seats empty)', () => {
+  test('startGame accepts 2 players, dealing only to the seats that exist', () => {
+    const room = G.createRoom('TWO1', 'p1');
+    G.addPlayer(room, { playerId: 'p1', displayName: 'Alice' }); // E
+    G.addPlayer(room, { playerId: 'p2', displayName: 'Bob' });   // S
+    G.startGame(room);
+    assert.equal(room.players.length, 2);
+    assert.equal(room.players.find(p => p.seat === 'E').hand.length, 14);
+    assert.equal(room.players.find(p => p.seat === 'S').hand.length, 13);
+  });
+
+  test('startGame accepts 3 players', () => {
+    const room = G.createRoom('THREE1', 'p1');
+    ['p1', 'p2', 'p3'].forEach((id, i) => G.addPlayer(room, { playerId: id, displayName: `P${i}` }));
+    G.startGame(room);
+    assert.equal(room.players.length, 3);
+    assert.deepEqual(room.players.map(p => p.seat), ['E', 'S', 'W'], 'seats fill E,S,W in order, leaving N empty');
+  });
+
+  test('startGame rejects fewer than 2 or more than 4 players', () => {
+    const solo = G.createRoom('ONE1', 'p1');
+    G.addPlayer(solo, { playerId: 'p1', displayName: 'Solo' });
+    assert.throws(() => G.startGame(solo));
+
+    const empty = G.createRoom('ZERO1', 'p1');
+    assert.throws(() => G.startGame(empty));
+  });
+
+  test('total live+dealt tiles still account for the full 144-tile deck regardless of player count', () => {
+    const room = G.createRoom('THREE2', 'p1');
+    ['p1', 'p2', 'p3'].forEach((id, i) => G.addPlayer(room, { playerId: id, displayName: `P${i}` }));
+    G.startGame(room);
+    const tileCount = room.wall.length + room.deadWall.length +
+      room.players.reduce((sum, p) => sum + p.hand.length + p.flowers.length, 0);
+    assert.equal(tileCount, 144, 'the full 144-tile wall is still built even with only 3 players seated');
+  });
+});
+
 describe('starting chips (house rules)', () => {
-  test('4 human players start with 500 chips each', () => {
+  test('a full 4-player table starts with 500 chips each', () => {
     const room = G.createRoom('CHIP1', 'p1');
     ['p1', 'p2', 'p3', 'p4'].forEach((id, i) => G.addPlayer(room, { playerId: id, displayName: `P${i}` }));
     G.startGame(room);
     room.players.forEach(p => assert.equal(p.score, 500));
   });
 
-  test('2-3 human players (AI filling remaining seats) start with 1000 chips each', () => {
+  test('a genuine 3-player table (one seat left empty) starts with 1000 chips each', () => {
     const room = G.createRoom('CHIP2', 'p1');
+    ['p1', 'p2', 'p3'].forEach((id, i) => G.addPlayer(room, { playerId: id, displayName: `P${i}` }));
+    G.startGame(room);
+    assert.equal(room.players.length, 3, 'the 4th seat should simply not exist, not be AI-filled');
+    room.players.forEach(p => assert.equal(p.score, 1000));
+  });
+
+  test('a genuine 2-player table starts with 1000 chips each', () => {
+    const room = G.createRoom('CHIP2B', 'p1');
+    ['p1', 'p2'].forEach((id, i) => G.addPlayer(room, { playerId: id, displayName: `P${i}` }));
+    G.startGame(room);
+    assert.equal(room.players.length, 2);
+    room.players.forEach(p => assert.equal(p.score, 1000));
+  });
+
+  test('a 4-player table still gets 500 chips even if some seats are AI (chip amount depends on seats filled, not human/AI mix)', () => {
+    const room = G.createRoom('CHIP2C', 'p1');
     G.addPlayer(room, { playerId: 'p1', displayName: 'Human1' });
-    G.addPlayer(room, { playerId: 'p2', displayName: 'Human2' });
     const ai1 = G.addPlayer(room, { playerId: 'ai1', displayName: 'AI1' });
     const ai2 = G.addPlayer(room, { playerId: 'ai2', displayName: 'AI2' });
-    room.players.find(p => p.seat === ai1).isAI = true;
-    room.players.find(p => p.seat === ai2).isAI = true;
+    const ai3 = G.addPlayer(room, { playerId: 'ai3', displayName: 'AI3' });
+    [ai1, ai2, ai3].forEach(seat => { room.players.find(p => p.seat === seat).isAI = true; });
     G.startGame(room);
-    room.players.forEach(p => assert.equal(p.score, 1000));
+    room.players.forEach(p => assert.equal(p.score, 500));
   });
 
   test('starting chips are only assigned once per match, not reset on subsequent hands', () => {

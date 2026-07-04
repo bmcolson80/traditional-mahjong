@@ -1,6 +1,6 @@
 # Traditional Mahjong — Real-Time Multiplayer
 
-A 4-player Traditional (Chinese/Classical) Mahjong game: Express + WebSocket server,
+A 2, 3, or 4-player Traditional (Chinese/Classical) Mahjong game: Express + WebSocket server,
 sql.js persistence, JWT auth, optional email OTP password reset, and optional
 web push notifications. Vanilla JS frontend, mobile-first.
 

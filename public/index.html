@@ -717,18 +717,21 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     const total = state.roomState.players.length;
     const aiCount = state.roomState.players.filter(p => p.isAI).length;
     document.getElementById('waitingStatus').textContent =
-      `${total}/4 players${aiCount > 0 ? ` · ${aiCount} AI` : ''} · Waiting…`;
+      total === 4
+        ? `4/4 players${aiCount > 0 ? ` · ${aiCount} AI` : ''} · Waiting…`
+        : `${total} player${total === 1 ? '' : 's'}${aiCount > 0 ? ` (${aiCount} AI)` : ''} · Waiting for more, or start now…`;
 
     // Host can fill any remaining empty seat with AI at any point while waiting —
-    // e.g. after friends join via room code but a 4th human never shows up.
+    // useful if they'd rather play against bots than short-handed, but per the
+    // rulebook it's optional: a real 2 or 3 player game is fully supported by
+    // just leaving the remaining seat(s) empty.
     const aiAddRow = document.getElementById('waitingAiAddRow');
     aiAddRow.style.display = (state.isHost && total < 4) ? '' : 'none';
 
-    // Start Game is a manual fallback for the (normally auto-started) total===4 case —
-    // it must never be shown when total < 4, since the server rejects start_game unless
-    // the table is already full (host should use "Add AI" above to fill it first).
+    // Start Game: host can start with as few as 2 players (real 2/3/4-player
+    // games are all valid per the rulebook — empty seats just aren't dealt in).
     const startBtn = document.getElementById('startGameBtn');
-    const canStart = state.isHost && total === 4;
+    const canStart = state.isHost && total >= 2;
     startBtn.style.display = canStart ? '' : 'none';
   }
 

@@ -140,6 +140,51 @@ describe('regression: round and dealer progression', () => {
   });
 });
 
+describe('regression: dealer rotation in genuine 2/3-player games (empty seats skipped)', () => {
+  test('in a 3-player game (E,S,W — N empty), dealership never lands on the empty seat', () => {
+    const room = G.createRoom('RR3P1', 'p1');
+    ['p1','p2','p3'].forEach((id,i) => G.addPlayer(room, { playerId: id, displayName: `P${i}` }));
+    assert.deepEqual(room.players.map(p => p.seat), ['E', 'S', 'W']);
+
+    G.advanceHand(room, { winnerSeat: 'S' }); // non-dealer win, deal should pass to the NEXT ACTIVE seat
+    assert.equal(room.round.dealerSeat, 'S', 'deal passes to S (E->S is the first active neighbor)');
+
+    G.advanceHand(room, { winnerSeat: 'W' });
+    assert.equal(room.round.dealerSeat, 'W');
+
+    G.advanceHand(room, { winnerSeat: 'E' }); // must wrap W -> E directly, skipping the empty N seat
+    assert.equal(room.round.dealerSeat, 'E', 'dealer rotation wraps W directly to E, never touching empty N');
+  });
+
+  test('a 3-player round completes (wind advances) after 3 hands, not 4', () => {
+    const room = G.createRoom('RR3P2', 'p1');
+    ['p1','p2','p3'].forEach((id,i) => G.addPlayer(room, { playerId: id, displayName: `P${i}` }));
+
+    G.advanceHand(room, { winnerSeat: 'S' }); // hand 1 -> 2
+    G.advanceHand(room, { winnerSeat: 'W' }); // hand 2 -> 3
+    assert.equal(G.getRoundWind(room), 'EW', 'still East round after only 2 dealer changes');
+    G.advanceHand(room, { winnerSeat: 'E' }); // hand 3 -> completes the round (3 active seats)
+    assert.equal(G.getRoundWind(room), 'SW', 'round wind advances after the deal cycles through all 3 active seats');
+  });
+
+  test('a 2-player round completes after 2 hands', () => {
+    const room = G.createRoom('RR2P1', 'p1');
+    ['p1','p2'].forEach((id,i) => G.addPlayer(room, { playerId: id, displayName: `P${i}` }));
+    assert.deepEqual(room.players.map(p => p.seat), ['E', 'S']);
+
+    G.advanceHand(room, { winnerSeat: 'S' });
+    assert.equal(G.getRoundWind(room), 'EW');
+    G.advanceHand(room, { winnerSeat: 'E' });
+    assert.equal(G.getRoundWind(room), 'SW', 'round wind advances after just 2 hands in a 2-player game');
+  });
+
+  test('nextSeat with an explicit active-seat list skips seats not in that list', () => {
+    assert.equal(G.nextSeat('E', ['E', 'S', 'W']), 'S');
+    assert.equal(G.nextSeat('W', ['E', 'S', 'W']), 'E', 'wraps past the empty N seat straight back to E');
+    assert.equal(G.nextSeat('E'), 'S', 'omitting activeSeats defaults to the full 4-seat compass (back-compat)');
+  });
+});
+
 describe('regression: fan → chip conversion table', () => {
   test('matches the house rule table exactly, capping at 64 for 6+ fan', () => {
     assert.equal(G.fanToChips(0), 1);
@@ -167,13 +212,13 @@ describe('regression: chip settlement house rules', () => {
     // winner S is not the dealer (E is dealer) — no dealer-win doubling applies.
     G.settleScore(room, 'S', 2, { selfDraw: true }); // fan 2 → base 4 chips
     const south = room.players.find(p => p.seat === 'S');
-    const east = room.players.find(p => p.seat === 'E');   // dealer, pays double as a non-winning-dealer payer
+    const east = room.players.find(p => p.seat === 'E');   // dealer, pays double the BASE as a non-winning-dealer payer
     const west = room.players.find(p => p.seat === 'W');
     const north = room.players.find(p => p.seat === 'N');
     assert.equal(west.score, -5, 'non-dealer opponent pays base(4) + 1');
     assert.equal(north.score, -5, 'non-dealer opponent pays base(4) + 1');
-    assert.equal(east.score, -10, 'dealer pays double the standard amount when a non-dealer wins');
-    assert.equal(south.score, 20, 'winner collects the sum of all three payments');
+    assert.equal(east.score, -9, 'dealer pays double the BASE (4*2=8), then the flat +1 self-draw bonus (9)');
+    assert.equal(south.score, 19, 'winner collects the sum of all three payments');
   });
 
   test('discard win: only the discarder pays, everyone else pays nothing', () => {
@@ -198,17 +243,17 @@ describe('regression: chip settlement house rules', () => {
     assert.equal(south.score, 4);
   });
 
-  test('dealer win: total payout received is doubled (first win, no streak yet)', () => {
+  test('dealer win: base portion of the payout is doubled (first win, no streak yet)', () => {
     const room = freshRoom('CH4');
     G.settleScore(room, 'E', 2, { selfDraw: true }); // fan 2 → base 4, dealer wins self-draw
     const east = room.players.find(p => p.seat === 'E');
     const others = room.players.filter(p => p.seat !== 'E');
-    // (base + 1) * 2 [dealer-win double] * 1 [streak multiplier, first win] = 10 per opponent
-    others.forEach(p => assert.equal(p.score, -10));
-    assert.equal(east.score, 30);
+    // base(4) * 2 [dealer-win double] * 1 [streak multiplier, first win] = 8, + flat 1 self-draw bonus = 9 per opponent
+    others.forEach(p => assert.equal(p.score, -9));
+    assert.equal(east.score, 27);
   });
 
-  test('dealer win streak multiplies the payout further on consecutive wins', () => {
+  test('dealer win streak multiplies the base portion further on consecutive wins', () => {
     const room = freshRoom('CH5');
     const firstGain = G.settleScore(room, 'E', 1, { selfDraw: true }).standings.find(s => s.seat === 'E').score;
     G.advanceHand(room, { winnerSeat: 'E' }); // dealer retains seat, streak becomes 1
@@ -217,9 +262,27 @@ describe('regression: chip settlement house rules', () => {
     G.settleScore(room, 'E', 1, { selfDraw: true }); // same fan again, now with streak multiplier x2
     const afterSecond = room.players.find(p => p.seat === 'E').score;
     const secondGain = afterSecond - beforeSecond;
-    // Per-opponent amount = (base 2 + 1) * 2[dealer-win double] * streakMultiplier, summed over 3 opponents.
-    assert.equal(firstGain, 18, 'first dealer win: (2+1)*2*1 = 6 per opponent x 3 = 18');
-    assert.equal(secondGain, 36, 'second consecutive win: (2+1)*2*2 = 12 per opponent x 3 = 36 (double the first)');
+    // Per-opponent amount = base(2) * 2[dealer-win double] * streakMultiplier + flat 1, summed over 3 opponents.
+    assert.equal(firstGain, 15, 'first dealer win: (2*2*1)+1 = 5 per opponent x 3 = 15');
+    assert.equal(secondGain, 27, 'second consecutive win: (2*2*2)+1 = 9 per opponent x 3 = 27');
+  });
+
+  // Direct verification against the rulebook's own worked examples (section 7).
+  test('matches rulebook Example 1: 2-fan discard win, only the discarder pays 4 chips', () => {
+    const room = freshRoom('CHEX1');
+    G.settleScore(room, 'S', 2, { selfDraw: false, discarderSeat: 'W' });
+    assert.equal(room.players.find(p => p.seat === 'W').score, -4);
+    assert.equal(room.players.find(p => p.seat === 'E').score, 0, 'dealer pays nothing on a discard win it has no part in');
+    assert.equal(room.players.find(p => p.seat === 'S').score, 4);
+  });
+
+  test('matches rulebook Example 2: dealer self-draw 3-fan (8 base) doubles to 16, +1 flat = 17/opponent, 34 total', () => {
+    const room = freshRoom('CHEX2');
+    G.settleScore(room, 'E', 3, { selfDraw: true }); // E is dealer
+    const east = room.players.find(p => p.seat === 'E');
+    const others = room.players.filter(p => p.seat !== 'E');
+    others.forEach(p => assert.equal(p.score, -17, 'doubled base (16) + flat self-draw bonus (1) = 17'));
+    assert.equal(east.score, 17 * others.length, `East nets 17 chips from each of ${others.length} opponents`);
   });
 
   test('dealerStreak resets to 0 once the deal passes to a new dealer', () => {

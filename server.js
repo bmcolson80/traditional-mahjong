@@ -478,7 +478,7 @@ function aiDiscard(room, player) {
   }
   const tile = AI.chooseDiscard(player.hand, player.exposed, player.aiSkill);
   G.discardTile(room, player, tile);
-  room.turnSeat = G.nextSeat(player.seat);
+  room.turnSeat = G.nextSeat(player.seat, room.players.map(p => p.seat));
   persistRoom(room);
   broadcastRoomState(room);
   broadcast(room, { type: 'tile_discarded', tile, fromSeat: player.seat });
@@ -651,7 +651,7 @@ function handleMessage(ws, msg) {
       const room = rooms.get(msg.roomCode);
       if (!room) return send(ws, { type: 'error', message: 'Room not found' });
       if (room.hostPlayerId !== meta.playerId) return send(ws, { type: 'error', message: 'Only the host can start the game' });
-      if (room.players.length !== 4) return send(ws, { type: 'error', message: 'Need exactly 4 players (use Add AI to fill seats)' });
+      if (room.players.length < 2) return send(ws, { type: 'error', message: 'Need at least 2 players to start' });
       G.startGame(room);
       persistRoom(room);
       broadcastRoomState(room);
@@ -683,7 +683,7 @@ function handleMessage(ws, msg) {
       const player = requirePlayer(room, meta.playerId);
       if (room.turnSeat !== player.seat) throw new Error('Not your turn');
       G.discardTile(room, player, msg.tile);
-      room.turnSeat = G.nextSeat(player.seat);
+      room.turnSeat = G.nextSeat(player.seat, room.players.map(p => p.seat));
       persistRoom(room);
       broadcastRoomState(room);
       broadcast(room, { type: 'tile_discarded', tile: msg.tile, fromSeat: player.seat });

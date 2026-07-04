@@ -105,6 +105,35 @@ describe('WebSocket game flow', () => {
     sockets.forEach(s => s.close());
   });
 
+  test('3 human players can start a genuine 3-player game directly, with no AI involved at all', async () => {
+    const sockets = [];
+    for (let i = 0; i < 3; i++) sockets.push(await connect());
+
+    const createPromise = waitForMessage(sockets[0], m => m.type === 'room_created');
+    sockets[0].send(JSON.stringify({ type: 'create_room', playerId: 'real3-p0', displayName: 'Host' }));
+    const created = await createPromise;
+    const roomCode = created.roomCode;
+
+    for (let i = 1; i < 3; i++) {
+      const joinPromise = waitForMessage(sockets[i], m => m.type === 'room_joined');
+      sockets[i].send(JSON.stringify({ type: 'join_room', roomCode, playerId: `real3-p${i}`, displayName: `P${i}` }));
+      await joinPromise;
+    }
+
+    // Host explicitly starts with just the 3 real players — no add_ai, no 4th seat at all.
+    const startedPromise = waitForMessage(sockets[0], m => m.type === 'game_started');
+    const statePromise = waitForMessage(sockets[0], m => m.type === 'room_state' && m.room.phase === 'playing');
+    sockets[0].send(JSON.stringify({ type: 'start_game', roomCode }));
+    await startedPromise;
+    const state = await statePromise;
+
+    assert.equal(state.room.players.length, 3, 'room should have exactly 3 players, no phantom 4th');
+    assert.ok(state.room.players.every(p => !p.isAI), 'no AI should have been added');
+    assert.deepEqual(state.room.players.map(p => p.seat), ['E', 'S', 'W'], 'seats fill E,S,W, leaving N empty');
+
+    sockets.forEach(s => s.close());
+  });
+
   test('room_state exposes hostPlayerId so the client can re-derive host status after a reconnect', async () => {
     const ws1 = await connect();
     const createdP = waitForMessage(ws1, m => m.type === 'room_created');
