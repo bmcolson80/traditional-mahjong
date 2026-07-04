@@ -102,27 +102,8 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
 .master-badge{background:rgba(201,64,64,.15);border:1px solid #c94040;color:#e08080}
 .waiting-hint{text-align:center;font-size:11px;color:rgba(255,255,255,.3);letter-spacing:2px;padding:10px}
 
-/* ── Game screen: wooden table + green felt + tile wall ──────────────────── */
-#game.screen.active{display:block;background-color:#3c2712;background-image:repeating-linear-gradient(90deg,rgba(0,0,0,.10) 0px,rgba(0,0,0,.10) 1px,transparent 1px,transparent 7px),linear-gradient(180deg,#5c3b1f,#2c1c0e 65%,#1a1108);background-attachment:fixed}
-
-/* Wooden frame with felt interior + tile wall, echoing the physical table */
-.table-frame{display:grid;grid-template-columns:14px 1fr 14px;grid-template-rows:auto 1fr auto;gap:3px;background:linear-gradient(160deg,#9c6a34,#6b4620 55%,#4a2f16);border-radius:14px;padding:6px;box-shadow:0 8px 20px rgba(0,0,0,.5),inset 0 2px 0 rgba(255,255,255,.1);margin-bottom:10px}
-.corner-stud{grid-row:span 1;background:radial-gradient(circle at 35% 35%,#e3c179,#7a5323 70%);border-radius:3px;box-shadow:inset 0 0 3px rgba(0,0,0,.6),0 1px 2px rgba(0,0,0,.4)}
-.wall-row{grid-column:2;display:flex;justify-content:center;align-items:center;gap:2px;flex-wrap:wrap;min-height:16px}
-.wall-top{grid-row:1}
-.wall-bottom{grid-row:3}
-.wall-col{grid-row:2;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:2px;width:12px}
-.wall-left{grid-column:1}
-.wall-right{grid-column:3}
-.wall-tile{width:9px;height:14px;background:var(--tile-bg);border-radius:2px;box-shadow:0 1px 2px rgba(0,0,0,.45),inset 0 -1px 0 rgba(0,0,0,.1);flex-shrink:0}
-.wall-row .wall-tile{width:9px;height:14px}
-.wall-col .wall-tile{width:14px;height:9px}
-.play-center{grid-column:2;grid-row:2;background:radial-gradient(ellipse at 50% 25%,#2f7a4d 0%,#1d5c39 55%,#123f27 100%);border-radius:8px;padding:10px;box-shadow:inset 0 0 24px rgba(0,0,0,.35)}
-.wall-count-label{text-align:center;font-family:'Cinzel',serif;font-size:10px;letter-spacing:2px;color:rgba(255,255,255,.5);margin-top:8px}
-
-/* Dealer's round-wind indicator tile, shown beside their score chip */
-.dealer-wind-tile{width:20px;margin-top:3px;border-radius:3px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.45)}
-.dealer-wind-tile svg{display:block;width:100%;height:auto}
+/* ── Game screen: bamboo table + tile rack ───────────────────────────────── */
+#game.screen.active{display:block;background-color:#c9a24b;background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.10) 0px,rgba(255,255,255,.10) 2px,transparent 2px,transparent 11px),repeating-linear-gradient(-45deg,rgba(0,0,0,.12) 0px,rgba(0,0,0,.12) 2px,transparent 2px,transparent 11px),linear-gradient(180deg,#dcb765,#ad8236);background-attachment:fixed}
 
 /* Game header (matches Colmedorno's game-header style) */
 .game-header{background:var(--navy-light);border-bottom:1px solid rgba(201,162,39,.2);padding:10px 14px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;gap:8px}
@@ -169,6 +150,8 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
 .tile.dragging{transition:none;z-index:50;box-shadow:0 10px 18px rgba(0,0,0,.5);cursor:grabbing}
 
 /* Animations */
+@keyframes tileDeal{from{opacity:0;transform:translateY(-130px) rotate(-10deg) scale(.7)}to{opacity:1;transform:translateY(0) rotate(0) scale(1)}}
+.tile.tile-deal{animation:tileDeal 420ms cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--deal-i,0) * 55ms)}
 @keyframes tileToss{0%{opacity:0;transform:scale(.4) rotate(-18deg)}65%{opacity:1;transform:scale(1.08) rotate(4deg)}100%{opacity:1;transform:scale(1) rotate(0)}}
 .tile.tile-toss{animation:tileToss 260ms ease-out}
 
@@ -335,31 +318,15 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     <span id="aiThinkingText">AI is thinking…</span>
   </div>
   <div class="game-body">
-    <div class="table-frame">
-      <div class="corner-stud"></div>
-      <div class="wall-row wall-top" id="wallTop"></div>
-      <div class="corner-stud"></div>
-
-      <div class="wall-col wall-left" id="wallLeft"></div>
-      <div class="play-center">
-        <div class="game-section discard-area">
-          <div class="game-section-title">DISCARD</div>
-          <div id="currentDiscardLabel" style="font-size:11px;color:rgba(255,255,255,.5);letter-spacing:1px;margin-bottom:4px"></div>
-          <div class="discard-tile" id="currentDiscardTile"></div>
-        </div>
-        <div class="game-section">
-          <div class="game-section-title">EXPOSED SETS</div>
-          <div id="allExposedSets"></div>
-        </div>
-        <div class="wall-count-label" id="wallCountLabel"></div>
-      </div>
-      <div class="wall-col wall-right" id="wallRight"></div>
-
-      <div class="corner-stud"></div>
-      <div class="wall-row wall-bottom" id="wallBottom"></div>
-      <div class="corner-stud"></div>
+    <div class="game-section discard-area">
+      <div class="game-section-title">DISCARD</div>
+      <div id="currentDiscardLabel" style="font-size:11px;color:rgba(255,255,255,.5);letter-spacing:1px;margin-bottom:4px"></div>
+      <div class="discard-tile" id="currentDiscardTile"></div>
     </div>
-
+    <div class="game-section">
+      <div class="game-section-title">EXPOSED SETS</div>
+      <div id="allExposedSets"></div>
+    </div>
     <div class="game-section">
       <div class="game-section-title">YOUR HAND <span class="hand-hint">· drag to rearrange</span></div>
       <div class="rack">
@@ -790,7 +757,7 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     aiThinking.style.display = currentIsAI ? '' : 'none';
     if (currentIsAI) document.getElementById('aiThinkingText').textContent = `${turnPlayer.displayName} is thinking…`;
 
-    // Scores bar (score-chip per player), with the round-wind tile pinned to the dealer's chip
+    // Scores bar (score-chip per player)
     const playersRow = document.getElementById('gamePlayers');
     playersRow.innerHTML = '';
     for (const p of room.players) {
@@ -801,18 +768,8 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
       chip.innerHTML = `<div class="sc-name">${p.isAI ? '🤖' : ''}${p.displayName} (${windLabel})</div>
         <div class="sc-pts">${p.score ?? 0}</div>
         ${p.isAI ? `<div class="sc-ai-tag">${(p.aiSkill || 'AI').toUpperCase()}</div>` : `<div class="sc-ai-tag">${p.handCount} tiles</div>`}`;
-      if (p.seat === room.round?.dealerSeat && room.roundWind) {
-        const windTile = document.createElement('div');
-        windTile.className = 'dealer-wind-tile';
-        windTile.title = `Round wind: ${roundNames[room.roundWind] || room.roundWind}`;
-        windTile.innerHTML = tileSVG(room.roundWind);
-        chip.appendChild(windTile);
-      }
       playersRow.appendChild(chip);
     }
-
-    // Tile wall around the table frame — exact remaining count, split across the 4 sides
-    renderWall(room.wallCount ?? 0);
 
     // discard
     const discardTileEl = document.getElementById('currentDiscardTile');
@@ -869,8 +826,7 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
 
   // Keeps the player's chosen tile order stable across server updates: tiles still
   // present keep their position, tiles no longer present (discarded/claimed) drop out,
-  // and newly drawn tiles are appended at the end. Also tracks how many tiles were
-  // freshly appended this call, so renderHand knows which ones to animate in from the wall.
+  // and newly drawn tiles are appended at the end.
   function reconcileHandOrder(serverHand) {
     const remaining = {};
     for (const t of serverHand) remaining[t] = (remaining[t] || 0) + 1;
@@ -878,89 +834,26 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     for (const t of state.handOrder) {
       if (remaining[t] > 0) { kept.push(t); remaining[t]--; }
     }
-    const beforeNew = kept.length;
     for (const t of serverHand) {
       if (remaining[t] > 0) { kept.push(t); remaining[t]--; }
     }
-    state.lastAppendedCount = kept.length - beforeNew;
     state.handOrder = kept;
   }
 
   function renderHand(isNewDeal) {
     const handRow = document.getElementById('handRow');
     handRow.innerHTML = '';
-    const total = state.handOrder.length;
-    const freshCount = isNewDeal ? total : (state.lastAppendedCount || 0);
-    const freshStart = total - freshCount;
-    const freshEls = [];
     state.handOrder.forEach((tile, index) => {
       const el = makeTileEl(tile);
       el.classList.add('selectable');
       if (state.selectedTile === tile) el.classList.add('selected');
+      if (isNewDeal) {
+        el.classList.add('tile-deal');
+        el.style.setProperty('--deal-i', index);
+      }
       el.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
       attachTileDrag(el, index);
       handRow.appendChild(el);
-      if (index >= freshStart) freshEls.push({ el, stagger: index - freshStart });
-    });
-    // Tiles just dealt/drawn fly in from the wall's current on-screen position
-    for (const { el, stagger } of freshEls) flyTileFromWall(el, stagger * 60);
-  }
-
-  // ---------- Tile wall (border of face-down tiles around the table) ----------
-  // Splits the exact remaining wall count evenly across the 4 sides (top, right,
-  // bottom, left), extra tiles going to the earlier sides — matching how a real
-  // wall depletes fairly evenly on all sides as tiles are drawn.
-  function wallSideCounts(total) {
-    const t = Math.max(0, total);
-    const base = Math.floor(t / 4);
-    const rem = t - base * 4;
-    const counts = [base, base, base, base];
-    for (let i = 0; i < rem; i++) counts[i]++;
-    return counts; // [top, right, bottom, left]
-  }
-
-  function renderWall(wallCount) {
-    const [topN, rightN, bottomN, leftN] = wallSideCounts(wallCount);
-    const sides = [['wallTop', topN], ['wallRight', rightN], ['wallBottom', bottomN], ['wallLeft', leftN]];
-    for (const [id, count] of sides) {
-      const host = document.getElementById(id);
-      if (!host) continue;
-      const diff = count - host.children.length;
-      if (diff > 0) {
-        for (let i = 0; i < diff; i++) {
-          const d = document.createElement('div');
-          d.className = 'wall-tile';
-          host.appendChild(d);
-        }
-      } else if (diff < 0) {
-        for (let i = 0; i < -diff; i++) host.lastElementChild?.remove();
-      }
-    }
-    const label = document.getElementById('wallCountLabel');
-    if (label) label.textContent = `${wallCount} TILE${wallCount === 1 ? '' : 'S'} LEFT IN WALL`;
-  }
-
-  // Animates a freshly dealt/drawn hand tile flying in from the wall's current
-  // on-screen position (its last remaining tile, or the wall frame itself if empty).
-  function flyTileFromWall(el, delayMs = 0) {
-    const wallHost = document.querySelector('.table-frame');
-    if (!wallHost) return;
-    const wallTiles = wallHost.querySelectorAll('.wall-tile');
-    const originEl = wallTiles.length ? wallTiles[wallTiles.length - 1] : wallHost;
-    const originRect = originEl.getBoundingClientRect();
-    requestAnimationFrame(() => {
-      const targetRect = el.getBoundingClientRect();
-      const dx = (originRect.left + originRect.width / 2) - (targetRect.left + targetRect.width / 2);
-      const dy = (originRect.top + originRect.height / 2) - (targetRect.top + targetRect.height / 2);
-      el.style.transition = 'none';
-      el.style.opacity = '0';
-      el.style.transform = `translate(${dx}px, ${dy}px) scale(.5) rotate(-14deg)`;
-      requestAnimationFrame(() => {
-        el.style.transition = `transform 420ms cubic-bezier(.2,.8,.2,1) ${delayMs}ms, opacity 240ms ease ${delayMs}ms`;
-        el.style.opacity = '1';
-        el.style.transform = 'translate(0,0) scale(1) rotate(0)';
-        setTimeout(() => { el.style.transition = ''; }, delayMs + 440);
-      });
     });
   }
 
@@ -1106,73 +999,37 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     `);
   }
 
-  // Canonical bamboo layouts matching the physical set: straight columns for
-  // small counts, a red stalk at the heart of 5, a red top stalk over two
-  // green rows for 7, a crossed pair of rows for 8, and alternating rows for 9.
-  const BAMBOO_LAYOUTS = {
-    2: [[50, 42, GREEN], [50, 98, GREEN]],
-    3: [[30, 35, GREEN], [50, 70, GREEN], [70, 105, GREEN]],
-    4: [[35, 45, GREEN], [65, 45, GREEN], [35, 100, GREEN], [65, 100, GREEN]],
-    5: [[30, 35, GREEN], [70, 35, GREEN], [50, 72, RED], [30, 110, GREEN], [70, 110, GREEN]],
-    6: [[28, 40, GREEN], [50, 40, GREEN], [72, 40, GREEN], [28, 100, GREEN], [50, 100, GREEN], [72, 100, GREEN]],
-    7: [[50, 28, RED], [28, 68, GREEN], [50, 68, GREEN], [72, 68, GREEN], [28, 112, GREEN], [50, 112, GREEN], [72, 112, GREEN]],
-    9: [[30, 32, GREEN], [50, 32, GREEN], [70, 32, GREEN], [30, 70, RED], [50, 70, RED], [70, 70, RED], [30, 108, GREEN], [50, 108, GREEN], [70, 108, GREEN]],
-  };
-
   function bambooSVG(n) {
     if (n === 1) return birdSVG();
-    if (n === 8) {
-      // Two clean rows of 4, matching the reference sheet's 8-bamboo tile.
-      const xs = [26, 42, 58, 74];
-      const topRow = xs.map(x => bambooStick(x, 38, GREEN)).join('');
-      const botRow = xs.map(x => bambooStick(x, 102, GREEN)).join('');
-      return svgWrap(topRow + botRow);
-    }
-    const layout = BAMBOO_LAYOUTS[n] || [];
-    const sticks = layout.map(([x, y, c]) => bambooStick(x, y, c)).join('');
+    const positions = gridPositions(n, 3);
+    const midIdx = Math.floor(positions.length / 2);
+    const sticks = positions.map((p, i) => bambooStick(p[0], p[1], (n === 5 && i === midIdx) ? RED : GREEN)).join('');
     return svgWrap(sticks);
   }
 
   function dotMedallion() {
     const rings = `
-      <circle cx="50" cy="70" r="38" fill="none" stroke="${GREEN}" stroke-width="2.5" stroke-dasharray="4 3"/>
-      <circle cx="50" cy="70" r="30" fill="none" stroke="${GREEN}" stroke-width="3"/>
-      <circle cx="50" cy="70" r="19" fill="none" stroke="${RED}" stroke-width="2.5"/>
-      <circle cx="50" cy="70" r="8" fill="${RED}"/>`;
+      <circle cx="50" cy="70" r="34" fill="none" stroke="${GREEN}" stroke-width="3"/>
+      <circle cx="50" cy="70" r="23" fill="none" stroke="${RED}" stroke-width="2.5"/>
+      <circle cx="50" cy="70" r="9" fill="${RED}"/>`;
     const spokes = Array.from({ length: 8 }).map((_, i) => {
       const a = (i * Math.PI) / 4;
-      const x1 = 50 + 14 * Math.cos(a), y1 = 70 + 14 * Math.sin(a);
-      const x2 = 50 + 24 * Math.cos(a), y2 = 70 + 24 * Math.sin(a);
-      return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${RED}" stroke-width="1.6"/>`;
+      const x1 = 50 + 17 * Math.cos(a), y1 = 70 + 17 * Math.sin(a);
+      const x2 = 50 + 29 * Math.cos(a), y2 = 70 + 29 * Math.sin(a);
+      return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${GREEN}" stroke-width="2"/>`;
     }).join('');
     return svgWrap(rings + spokes);
   }
 
-  function dotCircle(cx, cy, color, r = 9.5) {
-    return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}"/><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(0,0,0,.25)" stroke-width="1"/>`;
-  }
-
-  // Canonical pip layouts (per classic tile-face conventions) rather than a
-  // generic grid, so each number reads as its own recognizable pattern.
-  const DOT_LAYOUTS = {
-    2: [[50, 42, NAVY], [50, 98, GREEN]],
-    3: [[30, 38, GREEN], [50, 70, RED], [70, 102, NAVY]],
-    4: [[35, 44, GREEN], [65, 44, GREEN], [35, 96, NAVY], [65, 96, NAVY]],
-    5: [[30, 38, GREEN], [70, 38, GREEN], [50, 70, RED], [30, 102, GREEN], [70, 102, GREEN]],
-    6: [[30, 42, RED], [50, 42, RED], [70, 42, RED], [30, 98, RED], [50, 98, RED], [70, 98, RED]],
-    7: [[30, 34, GREEN], [50, 40, GREEN], [70, 46, GREEN], [35, 76, RED], [65, 76, RED], [35, 110, RED], [65, 110, RED]],
-    8: [[35, 30, GREEN], [65, 30, GREEN], [35, 58, GREEN], [65, 58, GREEN], [35, 86, GREEN], [65, 86, GREEN], [35, 114, GREEN], [65, 114, GREEN]],
-    9: [[30, 32, GREEN], [50, 32, GREEN], [70, 32, GREEN], [30, 70, RED], [50, 70, RED], [70, 70, RED], [30, 108, NAVY], [50, 108, NAVY], [70, 108, NAVY]],
-  };
-
   function dotSVG(n) {
     if (n === 1) return dotMedallion();
-    const layout = DOT_LAYOUTS[n] || [];
-    const circles = layout.map(([x, y, c]) => dotCircle(x, y, c)).join('');
+    const palette = [GREEN, RED, NAVY];
+    const positions = gridPositions(n, 3);
+    const circles = positions.map((p, i) => `<circle cx="${p[0]}" cy="${p[1]}" r="9" fill="${palette[i % palette.length]}"/>`).join('');
     return svgWrap(circles);
   }
 
-  const WIND_GLYPHS = { EW: ['東', INK], SW: ['南', INK], WW: ['西', INK], NW: ['北', INK] };
+  const WIND_GLYPHS = { EW: ['東', RED], SW: ['南', INK], WW: ['西', RED], NW: ['北', INK] };
   function windSVG(tile) {
     const [ch, color] = WIND_GLYPHS[tile];
     return svgWrap(glyph(ch, color, 68, 92));
@@ -1189,70 +1046,24 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
   }
 
   const BONUS_PALETTE = [RED, GREEN, NAVY, '#8e44ad'];
-
-  // Flower tiles (梅 plum / 蘭 orchid / 菊 chrysanthemum / 竹 bamboo): red
-  // character up top, small botanical motif beneath, per the reference sheet.
-  const FLOWER_CHARS = ['梅', '蘭', '菊', '竹'];
-  function flowerMotif(idx) {
-    if (idx === 1) { // plum blossom: a small cluster of five-petal blooms
-      return [[38, 108], [58, 118], [70, 100]].map(([cx, cy]) => Array.from({ length: 5 }).map((_, i) => {
-        const a = i * (2 * Math.PI / 5) - Math.PI / 2;
-        const x = cx + 6 * Math.cos(a), y = cy + 6 * Math.sin(a);
-        return `<circle cx="${x}" cy="${y}" r="3.6" fill="${RED}" opacity=".85"/>`;
-      }).join('')).join('') + `<circle cx="38" cy="108" r="1.6" fill="#fff7e0"/>`;
-    }
-    if (idx === 2) { // orchid: slender green leaf blades fanning out
-      return `<g fill="none" stroke="${GREEN}" stroke-width="3" stroke-linecap="round">
-        <path d="M50 122 C40 100 34 84 44 66"/>
-        <path d="M50 122 C50 98 50 80 50 62"/>
-        <path d="M50 122 C60 100 66 84 56 66"/>
-      </g>`;
-    }
-    if (idx === 3) { // chrysanthemum: layered petal rosette
-      return Array.from({ length: 8 }).map((_, i) => {
-        const a = i * (Math.PI / 4);
-        const x = 50 + 12 * Math.cos(a), y = 108 + 12 * Math.sin(a);
-        return `<ellipse cx="${x}" cy="${y}" rx="4" ry="8" fill="${RED}" opacity=".8" transform="rotate(${(a * 180 / Math.PI) + 90} ${x} ${y})"/>`;
-      }).join('') + `<circle cx="50" cy="108" r="5" fill="${GREEN}"/>`;
-    }
-    // bamboo leaf sprigs
-    return `<g fill="${GREEN}">
-      <path d="M50 122 L50 80"/>
-      <path d="M50 96 Q40 90 34 96 Q42 100 50 96"/>
-      <path d="M50 104 Q60 98 66 104 Q58 108 50 104"/>
-      <path d="M50 88 Q42 82 36 88 Q44 92 50 88"/>
-    </g>`.replace('<path d="M50 122 L50 80"/>', `<line x1="50" y1="122" x2="50" y2="80" stroke="${GREEN}" stroke-width="3"/>`);
-  }
   function flowerSVG(tile) {
     const idx = parseInt(tile[1], 10);
-    return svgWrap(flowerMotif(idx) + glyph(FLOWER_CHARS[idx - 1], RED, 40, 46));
+    const color = BONUS_PALETTE[(idx - 1) % BONUS_PALETTE.length];
+    const petals = Array.from({ length: 5 }).map((_, i) => {
+      const a = i * (2 * Math.PI / 5) - Math.PI / 2;
+      const cx = 50 + 19 * Math.cos(a), cy = 52 + 19 * Math.sin(a);
+      return `<circle cx="${cx}" cy="${cy}" r="11" fill="${color}" opacity="0.85"/>`;
+    }).join('');
+    return svgWrap(`${petals}<circle cx="50" cy="52" r="8" fill="#fdf6e3" stroke="${color}" stroke-width="2"/>` + glyph(String(idx), color, 28, 112));
   }
 
-  // Season tiles (春 spring / 夏 summer / 秋 autumn / 冬 winter): black character
-  // up top, small seasonal accent beneath.
-  const SEASON_CHARS = ['春', '夏', '秋', '冬'];
-  function seasonMotif(idx) {
-    if (idx === 1) { // spring: a small blossom sprig
-      return `<line x1="30" y1="122" x2="60" y2="92" stroke="${GREEN}" stroke-width="3" stroke-linecap="round"/>` +
-        [[42, 110], [55, 98], [66, 88]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="4.5" fill="${RED}" opacity=".85"/>`).join('');
-    }
-    if (idx === 2) { // summer: a lotus bloom
-      return Array.from({ length: 6 }).map((_, i) => {
-        const a = i * (Math.PI / 3) - Math.PI / 2;
-        const x = 50 + 11 * Math.cos(a), y = 106 + 8 * Math.sin(a);
-        return `<ellipse cx="${x}" cy="${y}" rx="6" ry="10" fill="#e07a9b" opacity=".8" transform="rotate(${a * 180 / Math.PI} ${x} ${y})"/>`;
-      }).join('') + `<circle cx="50" cy="106" r="5" fill="#f4c542"/>`;
-    }
-    if (idx === 3) { // autumn: a maple leaf
-      return `<path d="M50 88 L56 100 L68 98 L58 108 L64 120 L50 112 L36 120 L42 108 L32 98 L44 100 Z" fill="${RED}" opacity=".85"/>`;
-    }
-    // winter: a bare branch with a single blossom
-    return `<line x1="32" y1="122" x2="64" y2="90" stroke="${INK}" stroke-width="3" stroke-linecap="round"/>` +
-      `<circle cx="60" cy="94" r="6" fill="#fdf6e3" stroke="${RED}" stroke-width="1.5"/>`;
-  }
   function seasonSVG(tile) {
     const idx = parseInt(tile[1], 10);
-    return svgWrap(seasonMotif(idx) + glyph(SEASON_CHARS[idx - 1], INK, 40, 46));
+    const color = BONUS_PALETTE[(idx - 1) % BONUS_PALETTE.length];
+    return svgWrap(`
+      <path d="M50 26 L67 52 L50 78 L33 52 Z" fill="none" stroke="${color}" stroke-width="3"/>
+      <path d="M50 40 L59 52 L50 64 L41 52 Z" fill="${color}" opacity="0.75"/>
+    ` + glyph(String(idx), color, 28, 112));
   }
 
   function tileSVG(tile) {
