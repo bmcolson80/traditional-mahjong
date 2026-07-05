@@ -689,7 +689,11 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
         break;
       case 'room_state':
         state.roomState = msg.room;
-        state.isHost = msg.room.hostPlayerId === state.playerId; // re-derived every update — survives reconnects/rejoins
+        // Prefer hostUserId (stable across reinstalls/private-browsing/cleared storage) —
+        // hostPlayerId is just a local device ID and is only a fallback for legacy rooms.
+        state.isHost = msg.room.hostUserId != null
+          ? msg.room.hostUserId === state.user?.id
+          : msg.room.hostPlayerId === state.playerId;
         const me = msg.room.players.find(p => p.playerId === state.playerId);
         if (me) state.mySeat = me.seat;
         if (msg.room.phase === 'waiting') renderWaiting();
@@ -1347,13 +1351,18 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
   function renderActionBar(room, me, isMyTurn) {
     const bar = document.getElementById('actionBar');
     bar.innerHTML = '';
+    delete bar.dataset.actionTaken; // reset the double-fire guard — #actionBar is a
+    // persistent DOM node (only its contents get wiped each render), so without this
+    // reset the very first button click of the whole session would permanently
+    // disable every action button in every subsequent game, forever.
     if (!me) return;
 
     // Guards against double-fire: the moment ANY button in this bar is clicked,
     // every button in the bar is disabled immediately (synchronously, before the
     // WS round-trip), so a fast double-tap's second event lands on a disabled
     // button instead of sending the same action twice. The bar rebuilds fresh
-    // (with fresh, enabled buttons) on the next room_state broadcast regardless.
+    // (with fresh, enabled buttons, and the guard reset above) on the next
+    // room_state broadcast regardless.
     function guardedSend(msg) {
       if (bar.dataset.actionTaken) return;
       bar.dataset.actionTaken = '1';
