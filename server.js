@@ -236,13 +236,17 @@ app.get('/api/my-games', requireAuth, (req, res) => {
     const games = rows.map(row => {
       try {
         const s = JSON.parse(row.state_json);
+        const humans = (s.players ?? []).filter(p => !p.isAI && p.userId != null);
+        const isHost = s.hostUserId != null
+          ? s.hostUserId === req.user.id
+          : (s.hostPlayerId === row.player_id) || (humans.length === 1 && humans[0].userId === req.user.id);
         return {
           roomCode: row.room_code,
           phase: row.phase,
           roundWind: s.round ? ['East','South','West','North'][s.round.windIndex ?? 0] : 'East',
           handNumber: s.round?.handNumber ?? 1,
           turnSeat: s.turnSeat,
-          isHost: s.hostPlayerId === row.player_id,
+          isHost,
           players: (s.players ?? []).map(p => ({
             displayName: p.displayName,
             seat: p.seat,
@@ -279,7 +283,11 @@ app.post('/api/games/:roomCode/end', requireAuth, (req, res) => {
       if (!gameRow || gameRow.phase === 'ended') return res.status(404).json({ error: 'Game already ended' });
       try { room = JSON.parse(gameRow.state_json); } catch { return res.status(500).json({ error: 'Corrupt game state' }); }
     }
-    if (room.hostPlayerId !== gpRow.player_id) return res.status(403).json({ error: 'Only the host can end the game' });
+    const humans = (room.players ?? []).filter(p => !p.isAI && p.userId != null);
+    const isHost = room.hostUserId != null
+      ? room.hostUserId === req.user.id
+      : (room.hostPlayerId === gpRow.player_id) || (humans.length === 1 && humans[0].userId === req.user.id);
+    if (!isHost) return res.status(403).json({ error: 'Only the host can end the game' });
 
     if (rooms.has(roomCode)) endRoom(rooms.get(roomCode));
     else { room.phase = 'ended'; persistRoom(room); }
@@ -330,6 +338,7 @@ function publicRoomView(room, forSeat) {
     currentDiscard: room.currentDiscard,
     wallCount: room.wall.length,
     hostPlayerId: room.hostPlayerId,
+    hostUserId: room.hostUserId ?? null,
     players: room.players.map(p => ({
       playerId: p.playerId,
       displayName: p.displayName,
@@ -607,6 +616,11 @@ function executeAiWin(room, player, selfDraw, winningTile, discarderSeat) {
   }
 }
 
+function isRoomHost(room, meta) {
+  if (room.hostUserId != null) return room.hostUserId === meta.userId;
+  return room.hostPlayerId === meta.playerId;
+}
+
 function endRoom(room) {
   clearAiTimeout(room);
   room.phase = 'ended';
@@ -622,14 +636,14 @@ function handleMessage(ws, msg) {
     case 'abandon_game': {
       const room = rooms.get(meta.roomCode);
       if (!room) return send(ws, { type: 'error', message: 'Room not found' });
-      if (room.hostPlayerId !== meta.playerId) return send(ws, { type: 'error', message: 'Only the host can end the game' });
+      if (!isRoomHost(room, meta)) return send(ws, { type: 'error', message: 'Only the host can end the game' });
       endRoom(room);
       break;
     }
     case 'create_room': {
       const roomCode = genRoomCode();
       const playerId = msg.playerId ?? randomUUID();
-      const room = G.createRoom(roomCode, playerId);
+      const room = G.createRoom(roomCode, playerId, msg.userId ?? null);
       G.addPlayer(room, { playerId, userId: msg.userId, displayName: msg.displayName ?? 'Player' });
       // Pre-configured AI players added from the dashboard
       const aiConfigs = Array.isArray(msg.aiPlayers) ? msg.aiPlayers.slice(0, 3) : [];
@@ -660,7 +674,7 @@ function handleMessage(ws, msg) {
       const room = rooms.get(msg.roomCode);
       if (!room) return send(ws, { type: 'error', message: 'Room not found' });
       if (room.phase !== 'waiting') return send(ws, { type: 'error', message: 'Game already in progress' });
-      if (room.hostPlayerId !== meta.playerId) return send(ws, { type: 'error', message: 'Only the host can add AI players' });
+      if (!isRoomHost(room, meta)) return send(ws, { type: 'error', message: 'Only the host can add AI players' });
       if (room.players.length >= 4) return send(ws, { type: 'error', message: 'Room is full' });
       const skill = ['rookie', 'veteran', 'master'].includes(msg.skill) ? msg.skill : 'rookie';
       const aiCount = room.players.filter(p => p.isAI && p.aiSkill === skill).length;
@@ -684,7 +698,7 @@ function handleMessage(ws, msg) {
       const room = rooms.get(msg.roomCode);
       if (!room) return send(ws, { type: 'error', message: 'Room not found' });
       if (room.phase !== 'waiting') return send(ws, { type: 'error', message: 'Game already in progress' });
-      if (room.hostPlayerId !== meta.playerId) return send(ws, { type: 'error', message: 'Only the host can remove AI players' });
+      if (!isRoomHost(room, meta)) return send(ws, { type: 'error', message: 'Only the host can remove AI players' });
       const aiIdx = room.players.map((p, i) => ({ p, i })).reverse().find(({ p }) => p.isAI)?.i;
       if (aiIdx === undefined) return send(ws, { type: 'error', message: 'No AI players to remove' });
       room.players.splice(aiIdx, 1);
@@ -698,7 +712,7 @@ function handleMessage(ws, msg) {
     case 'start_game': {
       const room = rooms.get(msg.roomCode);
       if (!room) return send(ws, { type: 'error', message: 'Room not found' });
-      if (room.hostPlayerId !== meta.playerId) return send(ws, { type: 'error', message: 'Only the host can start the game' });
+      if (!isRoomHost(room, meta)) return send(ws, { type: 'error', message: 'Only the host can start the game' });
       if (room.players.length < 2) return send(ws, { type: 'error', message: 'Need at least 2 players to start' });
       G.startGame(room);
       persistRoom(room);
@@ -904,10 +918,27 @@ function handleMessage(ws, msg) {
       // otherwise host status silently breaks on reconnect: the End Game button
       // (and everything else gated on isHost) disappears even though it's genuinely
       // still their room, just recognized under a new local ID now.
+      const wasHostByLegacyId = room.hostPlayerId === player.playerId;
       if (msg.playerId && msg.playerId !== player.playerId) {
-        if (room.hostPlayerId === player.playerId) room.hostPlayerId = msg.playerId;
+        if (wasHostByLegacyId) room.hostPlayerId = msg.playerId;
         player.playerId = msg.playerId;
       }
+      // Backfill the stable hostUserId onto legacy rooms that predate this field —
+      // this is what permanently migrates a room like this the moment its host
+      // reconnects, instead of this class of bug recurring every time storage resets.
+      if (room.hostUserId == null && wasHostByLegacyId && (msg.userId ?? player.userId) != null) {
+        room.hostUserId = msg.userId ?? player.userId;
+      }
+      // Last-resort fallback: if hostUserId is still missing and the legacy playerId
+      // trail is ALSO broken (the old hostPlayerId doesn't match anything we can trace),
+      // but this player is the only human at the table, they must be the host — nobody
+      // else could be. This is what recovers a room where the original corruption was
+      // worse than a simple ID swap.
+      if (room.hostUserId == null) {
+        const humans = room.players.filter(p => !p.isAI && p.userId != null);
+        if (humans.length === 1 && humans[0] === player) room.hostUserId = player.userId ?? msg.userId;
+      }
+      persistRoom(room);
       clients.set(ws, {
         roomCode: room.code,
         playerId: player.playerId,
@@ -966,4 +997,4 @@ if (process.env.NODE_ENV !== 'test') {
   startServer();
 }
 
-export { app, server, rooms, clients };
+export { app, server, rooms, clients, persistRoom };
