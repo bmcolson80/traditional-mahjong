@@ -43,7 +43,7 @@ export function isHonorTile(tile) {
 
 // ---------- Room / game state ----------
 
-export function createRoom(roomCode, hostPlayerId) {
+export function createRoom(roomCode, hostPlayerId, hostUserId = null) {
   return {
     code: roomCode,
     phase: 'waiting', // waiting | playing | finished
@@ -68,6 +68,11 @@ export function createRoom(roomCode, hostPlayerId) {
       dealerStreak: 0, matchOverReason: null, bankruptSeats: [],
     },
     hostPlayerId,
+    // hostUserId is the AUTHORITATIVE host check wherever available — a userId is
+    // permanent (tied to the login), unlike hostPlayerId which is just a local device
+    // ID that resets on cleared storage, reinstall, or a private tab. hostPlayerId is
+    // kept only as a fallback for anonymous/legacy rooms that predate this field.
+    hostUserId,
     gameState: {},
     chipsInitialized: false, // set true once starting chips are assigned (first startGame of the match)
   };
