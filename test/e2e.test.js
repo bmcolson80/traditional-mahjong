@@ -7,7 +7,7 @@ process.env.DB_PATH = './test/e2e-test.db';
 process.env.PORT = '3901';
 process.env.JWT_SECRET = 'test-secret';
 
-const { startServer, server, rooms } = await import('../server.js');
+const { startServer, server, rooms, persistRoom } = await import('../server.js');
 
 let baseUrl;
 
@@ -183,6 +183,44 @@ describe('WebSocket game flow', () => {
       'hostPlayerId must be carried forward to the new local playerId, or the host silently loses ' +
       'access to host-only controls (End Game, Start Game, Add AI) despite still owning the room');
     ws2.close();
+  });
+
+  test('a legacy room with a completely untraceable hostPlayerId still recovers host status for the sole human player', async () => {
+    // This models exactly the kind of already-corrupted production room this fix
+    // targets: created before hostUserId existed, and hostPlayerId no longer matches
+    // anything (worse than a simple "playerId changed" case — simple carryover can't
+    // help here since there's no matching old ID to carry forward).
+    const email = `legacy${Date.now()}@example.com`;
+    const regRes = await fetch(`${baseUrl}/api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, name: 'LegacyHost', password: 'testpass123' }),
+    });
+    const cookie = regRes.headers.get('set-cookie').split(';')[0];
+    const { id: userId } = await regRes.json();
+
+    const ws1 = await connect();
+    const createdP = waitForMessage(ws1, m => m.type === 'room_created');
+    ws1.send(JSON.stringify({ type: 'create_room', playerId: 'some-pid', userId, displayName: 'LegacyHost' }));
+    const { roomCode } = await createdP;
+
+    // Simulate the pre-existing corruption directly: no hostUserId (legacy), and
+    // hostPlayerId now pointing at something untraceable.
+    const room = rooms.get(roomCode);
+    room.hostUserId = null;
+    room.hostPlayerId = 'totally-unrelated-stale-id';
+    persistRoom(room);
+    ws1.close();
+    await new Promise(r => setTimeout(r, 50));
+
+    const myGames = await (await fetch(`${baseUrl}/api/my-games`, { headers: { Cookie: cookie } })).json();
+    const listed = myGames.find(g => g.roomCode === roomCode);
+    assert.ok(listed, 'the room should still be listed');
+    assert.equal(listed.isHost, true,
+      'the sole human at the table should be inferred as host even when hostPlayerId is untraceable');
+
+    const endRes = await fetch(`${baseUrl}/api/games/${roomCode}/end`, { method: 'POST', headers: { Cookie: cookie } });
+    assert.equal(endRes.status, 200, 'ending the game via the same inference should succeed');
   });
 
   test('invalid message type returns an error, not a crash', async () => {
