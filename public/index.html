@@ -167,7 +167,9 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
 .tile svg{display:block;width:100%;height:auto}
 .tile.selectable{cursor:grab}
 .tile.selected{outline:3px solid #c94040;transform:translateY(-6px)}
-.tile.dragging{transition:none;z-index:50;box-shadow:0 10px 18px rgba(0,0,0,.5);cursor:grabbing}
+.tile.dragging{transition:none;box-shadow:0 12px 22px rgba(0,0,0,.55);cursor:grabbing;pointer-events:none;z-index:9999}
+.tile.drag-placeholder{background:transparent;box-shadow:none;outline:2px dashed rgba(201,162,39,.5);opacity:.5}
+.tile.drag-placeholder svg{visibility:hidden}
 
 /* Animations */
 @keyframes tileToss{0%{opacity:0;transform:scale(.4) rotate(-18deg)}65%{opacity:1;transform:scale(1.08) rotate(4deg)}100%{opacity:1;transform:scale(1) rotate(0)}}
@@ -178,6 +180,25 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
 .modal-overlay.active{display:flex}
 .modal{background:var(--navy-light);border:1px solid rgba(201,162,39,.3);border-radius:var(--radius);padding:24px;width:100%;max-width:340px;max-height:80vh;overflow-y:auto}
 .modal h2{font-family:'Cinzel',serif;font-size:14px;letter-spacing:3px;color:var(--gold);margin-bottom:16px;text-align:center}
+
+/* Rules modal */
+.modal.modal-lg{max-width:720px}
+.rules-tabs{display:flex;gap:8px;margin-bottom:14px;border-bottom:1px solid rgba(201,162,39,.2);padding-bottom:10px}
+.rules-tab{flex:1;background:none;border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.6);border-radius:6px;padding:8px;cursor:pointer;font-family:'Cinzel',serif;font-size:11px;letter-spacing:1px}
+.rules-tab.active{border-color:var(--gold);color:var(--gold);background:rgba(201,162,39,.08)}
+.rules-body{font-size:13px;color:rgba(255,255,255,.75);line-height:1.6}
+.rules-body h3{font-family:'Cinzel',serif;color:var(--gold);font-size:15px;letter-spacing:1px;margin-bottom:6px}
+.rules-body h4{font-family:'Cinzel',serif;color:var(--cream);font-size:12px;letter-spacing:1px;margin:16px 0 6px;text-transform:uppercase}
+.rules-body p{margin-bottom:8px}
+.rules-body ul{margin:0 0 8px 18px}
+.rules-body li{margin-bottom:4px}
+.rules-sub{color:rgba(255,255,255,.45);font-size:12px;font-style:italic;margin-bottom:12px}
+.rules-table{width:100%;border-collapse:collapse;margin:8px 0 14px;font-size:12px}
+.rules-table th,.rules-table td{border:1px solid rgba(255,255,255,.12);padding:6px 8px;text-align:left}
+.rules-table th{background:rgba(201,162,39,.1);color:var(--gold);font-family:'Cinzel',serif;letter-spacing:.5px;font-weight:400}
+.rules-pdf-frame{width:100%;height:60vh;border-radius:6px;overflow:hidden;border:1px solid rgba(255,255,255,.12)}
+.rules-pdf-frame object{width:100%;height:100%}
+.rules-pdf-frame p{padding:16px;text-align:center}
 
 /* Toast */
 .toast{position:fixed;top:70px;left:50%;transform:translateX(-50%);background:var(--navy-mid);border:1px solid rgba(201,162,39,.4);border-radius:20px;padding:8px 20px;font-size:12px;color:var(--gold);z-index:999;white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,.5);transition:opacity .4s;pointer-events:none;font-family:'Cinzel',serif;letter-spacing:1px;opacity:0}
@@ -262,6 +283,83 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
   </div>
 </div>
 
+<!-- RULES MODAL -->
+<div class="modal-overlay" id="rulesOverlay">
+  <div class="modal modal-lg" onclick="event.stopPropagation()">
+    <h2>RULES</h2>
+    <div class="rules-tabs">
+      <button class="rules-tab active" id="rulesTabHouse">House Rules</button>
+      <button class="rules-tab" id="rulesTabHands">Special Hands</button>
+    </div>
+    <div class="rules-body" id="rulesBodyHouse">
+      <h3>The Custom Definitive Mahjong Rules</h3>
+      <p class="rules-sub">Optimized for 2, 3, or 4 players using the full 144-tile deck. A fast-paced "Free-for-All Chow" house rule and a strict, high-stakes chip economy.</p>
+
+      <h4>1. The Hierarchy of Time</h4>
+      <ul>
+        <li><strong>The Turn</strong> — draw (or claim a discard), then discard.</li>
+        <li><strong>The Hand</strong> — one deal, from opening tiles to someone calling "Mahjong!" (or the wall running out). Chips settle immediately at the end of every hand.</li>
+        <li><strong>The Round</strong> — a block of play under one Prevailing Wind, complete once the dealer role has rotated through every active seat.</li>
+        <li><strong>The Game</strong> — a full match of 4 rounds: East, South, West, North.</li>
+      </ul>
+
+      <h4>2. Components</h4>
+      <p>All 144 tiles: Suits (108) — Dots, Bamboos, Characters, 1-9 x4 each. Honors (28) — 4 Winds, 3 Dragons x4 each. Bonus (8) — 4 Flowers, 4 Seasons.</p>
+      <p><strong>Starting chips:</strong> 500/player at a full 4-player table; 1,000/player with only 2 or 3 (chips concentrate faster with fewer players, so everyone gets a bigger buffer).</p>
+
+      <h4>3. Setup &amp; Dealing</h4>
+      <p>Highest roll is East (the dealer); seats run East → South (right) → West (across) → North (left). All 4 walls are built regardless of player count, so the full tile pool always stays in play — empty seats just don't get dealt in. Flowers/Seasons drawn are flipped up immediately and replaced from the back of the wall.</p>
+
+      <h4>4. Melds</h4>
+      <table class="rules-table">
+        <tr><th>Meld</th><th>Description</th><th>Example</th></tr>
+        <tr><td>Chow</td><td>3 consecutive tiles, same suit</td><td>4, 5, 6 of Bamboos</td></tr>
+        <tr><td>Pung</td><td>3 identical tiles</td><td>Three White Dragons</td></tr>
+        <tr><td>Kong</td><td>4 identical tiles (draws a replacement tile)</td><td>Four 9 of Dots</td></tr>
+        <tr><td>Pair (the Eye)</td><td>2 identical tiles</td><td>Two East Winds</td></tr>
+      </table>
+      <p>A winning hand is 4 melds + 1 pair. Melds built by claiming a discard are laid face-up ("exposed") and can't be broken apart afterward.</p>
+
+      <h4>5. Turn Flow &amp; Free-for-All Claims</h4>
+      <p>Any player may instantly claim the most recent discard if it completes a meld — turn order resumes from the claimer's seat. Priority: <strong>Mahjong</strong> beats everything, then <strong>Pung/Kong</strong>, then <strong>Chow</strong> — and under this table's house rule, a Chow may be claimed from <em>any</em> discarder, not just the player to your left.</p>
+
+      <h4>6. Scoring — Fan → Chips</h4>
+      <p>Total your Fan, then convert to a base chip value via exponential doubling (0 fan = 1 chip, 1 = 2, 2 = 4, 3 = 8, 4 = 16, 5 = 32, 6+/Limit Hand = 64):</p>
+      <ul>
+        <li>Concealed Hand — 1 fan</li>
+        <li>Self-Draw / Zimo — 1 fan</li>
+        <li>No Chows (all Pungs/Kongs + a pair) — 1 fan</li>
+        <li>Matching Wind (seat or round) — 1 fan</li>
+        <li>Dragon Pung — 1 fan</li>
+        <li>Correct Flower/Season (matches your seat number) — 1 fan</li>
+        <li>All Chows — 2 fan</li>
+        <li>One Suit + Honors — 3 fan</li>
+        <li>All Pungs — 3 fan</li>
+        <li>Pure One Suit — 6 fan</li>
+        <li>Thirteen Orphans — Limit Hand (capped at 64 chips)</li>
+      </ul>
+      <p>Named special hands from the illustrated catalog (see the Special Hands tab) score on their own fixed tier instead — Half Limit (32), Limit (64), Middle Limit (96), or Double Limit (128) chips — rather than being fan-counted.</p>
+
+      <h4>7. Payouts</h4>
+      <p><strong>Discard win:</strong> only the discarder pays the base value. <strong>Self-draw win:</strong> every other active player pays the base value, plus a flat +1 self-draw bonus each. <strong>Dealer factor:</strong> if the dealer wins, their payout doubles; if a non-dealer wins, the dealer (as a payer) pays double. A dealer's win streak multiplies their payout further on each consecutive win.</p>
+
+      <h4>8. Round Progression &amp; Bankruptcy</h4>
+      <p>The dealer keeps their seat after a win or a draw (their win streak grows on a win, resets on losing the deal). Once the deal rotates through every active seat, the round ends and the Prevailing Wind advances. If a player can't pay their debt at the end of a hand and drops to 0 or below, the match ends immediately — remaining players are ranked by chip count, and the bankrupt player takes last place.</p>
+    </div>
+    <div class="rules-body" id="rulesBodyHands" style="display:none">
+      <h3>The Western Hands — Special Hand Catalog</h3>
+      <p class="rules-sub">An illustrated reference of named special hands (Wriggly Snake, Dragonfly, Windy Ones, Ruby Jade, and dozens more) that this table recognizes as instant valid Mahjong, scored on their own Half/Middle/Double Limit tiers rather than counted in fan. This is the full source book — use it to look up any hand by name or picture.</p>
+      <div class="rules-pdf-frame">
+        <object data="/rules/special-hands.pdf" type="application/pdf">
+          <p>Your browser can't preview PDFs inline. <a href="/rules/special-hands.pdf" target="_blank" rel="noopener">Open the catalog in a new tab</a> instead.</p>
+        </object>
+      </div>
+      <a class="btn btn-secondary" href="/rules/special-hands.pdf" target="_blank" rel="noopener" style="display:block;text-align:center;margin-top:10px">Open Full-Size in a New Tab</a>
+    </div>
+    <button class="btn btn-secondary" id="rulesCloseBtn" style="margin-top:14px">Close</button>
+  </div>
+</div>
+
 <!-- ═══ DASHBOARD ═══ -->
 <div id="dashboard" class="screen">
   <div class="dashboard-header">
@@ -269,6 +367,7 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     <div class="user-chip">
       <div class="avatar" id="userAvatar">?</div>
       <span class="user-name-display" id="dashName"></span>
+      <button class="btn btn-secondary btn-sm" id="dashRulesBtn">Rules</button>
       <button class="btn btn-secondary btn-sm" id="logoutBtn">Sign Out</button>
     </div>
   </div>
@@ -340,6 +439,7 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
 <div id="game" class="screen">
   <div class="game-header" id="gameHeader">
     <button class="menu-btn" id="gameMenuBtn">☰</button>
+    <button class="menu-btn" id="gameRulesBtn" title="Rules">📖</button>
     <div class="round-info" id="roundBanner"></div>
     <span class="turn-badge" id="turnBadge">–</span>
     <button class="btn-danger-sm" id="abandonBtn" style="display:none">⚠ End</button>
@@ -399,6 +499,7 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     mySeat: null,
     roomState: null,
     selectedTile: null,
+    fishingLocked: false, // true when it's my turn, I've declared fishing, and the drawn-tile discard is forced
     isHost: false,
     handOrder: [],        // client-side tile order for drag-to-rearrange, reconciled against server hand
     dealtHandKey: null,   // identifies the current hand, used to trigger the deal-in animation once per hand
@@ -845,9 +946,9 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     for (const p of room.players) {
       const chip = document.createElement('div');
       chip.className = 'score-chip' + (p.seat === room.turnSeat ? ' active-turn' : '');
-      chip.title = `${p.displayName}: ${p.score ?? 0} chips`;
+      chip.title = `${p.displayName}: ${p.score ?? 0} chips${p.fishing ? ' — fishing 🎣' : ''}`;
       const windLabel = { EW: 'E', SW: 'S', WW: 'W', NW: 'N' }[p.seatWind] || '';
-      chip.innerHTML = `<div class="sc-name">${p.isAI ? '🤖' : ''}${p.displayName} (${windLabel})</div>
+      chip.innerHTML = `<div class="sc-name">${p.isAI ? '🤖' : ''}${p.displayName} (${windLabel})${p.fishing ? ' 🎣' : ''}</div>
         <div class="sc-pts">${p.score ?? 0}</div>
         ${p.isAI ? `<div class="sc-ai-tag">${(p.aiSkill || 'AI').toUpperCase()}</div>` : `<div class="sc-ai-tag">${p.handCount} tiles</div>`}`;
       if (p.seat === room.round?.dealerSeat && room.roundWind) {
@@ -887,7 +988,7 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     for (const p of room.players) {
       if (!p.exposed || p.exposed.length === 0) continue;
       const row = document.createElement('div');
-      row.innerHTML = `<strong>${p.seat}</strong>`;
+      row.innerHTML = `<strong>${p.seat} - ${p.displayName}</strong>`;
       const setsRow = document.createElement('div');
       setsRow.className = 'exposed-sets';
       for (const set of p.exposed) {
@@ -911,6 +1012,15 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
       state.dealtHandKey = dealKey;
     }
     if (me && me.hand) reconcileHandOrder(me.hand);
+
+    // Fishing lock: once declared, the only tile this player may ever discard
+    // again is whatever they just drew. Force that selection and freeze
+    // manual tile-picking so the UI can't offer a choice the server would
+    // reject anyway (see `selectTile` and the `declare_fishing`/`discard`
+    // handlers in server.js for the authoritative enforcement).
+    state.fishingLocked = Boolean(me && me.fishing && isMyTurn && me.hand && me.hand.length % 3 === 2);
+    if (state.fishingLocked) state.selectedTile = me.hand[me.hand.length - 1];
+
     renderHand(isNewDeal);
 
     renderActionBar(room, me, isMyTurn);
@@ -936,6 +1046,7 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
   }
 
   function renderHand(isNewDeal) {
+    cancelActiveDrag();
     const handRow = document.getElementById('handRow');
     handRow.innerHTML = '';
     const total = state.handOrder.length;
@@ -947,7 +1058,7 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
       el.classList.add('selectable');
       if (state.selectedTile === tile) el.classList.add('selected');
       el.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
-      attachTileDrag(el, index);
+      attachTileDrag(el);
       handRow.appendChild(el);
       if (index >= freshStart) freshEls.push({ el, stagger: index - freshStart });
     });
@@ -1014,15 +1125,7 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
   }
 
   // ---------- Drag-to-rearrange ----------
-  // Pure helpers (no DOM) so the reorder math can be reasoned about/tested independently.
-  function computeDropIndex(siblingCenters, pointerX) {
-    let idx = 0;
-    for (const cx of siblingCenters) {
-      if (pointerX > cx) idx++;
-    }
-    return idx;
-  }
-
+  // Pure helper (no DOM) so the reorder math can be reasoned about/tested independently.
   function moveItem(arr, fromIndex, toIndex) {
     const copy = arr.slice();
     const [item] = copy.splice(fromIndex, 1);
@@ -1031,63 +1134,139 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     return copy;
   }
 
-  function attachTileDrag(el, index) {
-    let dragging = false;
-    let pointerId = null;
-    let startX = 0, startY = 0;
+  // Tracks the in-progress drag so a server-pushed re-render mid-drag (e.g. an
+  // opponent's move arriving over the socket) tears it down cleanly instead of
+  // leaving the floating ghost tile orphaned in <body>.
+  let activeDrag = null;
 
-    function onPointerMove(e) {
-      if (e.pointerId !== pointerId) return;
-      const dx = e.clientX - startX;
-      const dy = e.clientY - startY;
-      if (!dragging && (Math.abs(dx) > 6 || Math.abs(dy) > 6)) {
-        dragging = true;
-        el._wasDragged = true;
-        el.classList.add('dragging');
-      }
-      if (!dragging) return;
-      e.preventDefault();
-      el.style.transform = `translate(${dx}px, ${Math.min(dy, 0) - 14}px) scale(1.08)`;
+  function cancelActiveDrag() {
+    if (!activeDrag) return;
+    activeDrag.teardown();
+    activeDrag = null;
+  }
+
+  // FLIP technique: siblings already moved to their new layout position (via
+  // the placeholder insertBefore), so we measure the delta from where they
+  // *were*, jump them back there with no transition, then release on the next
+  // frame so the `.tile` rule's existing transform transition animates the
+  // slide instead of letting it snap.
+  function flipSiblings(children, firstRects) {
+    for (const child of children) {
+      const first = firstRects.get(child);
+      if (!first) continue;
+      const last = child.getBoundingClientRect();
+      const dx = first.left - last.left;
+      if (Math.abs(dx) < 0.5) continue;
+      child.style.transition = 'none';
+      child.style.transform = `translateX(${dx}px)`;
+      requestAnimationFrame(() => {
+        child.style.transition = '';
+        child.style.transform = '';
+      });
     }
+  }
 
-    function onPointerUp(e) {
-      if (e.pointerId !== pointerId) return;
-      el.removeEventListener('pointermove', onPointerMove);
-      el.removeEventListener('pointerup', onPointerUp);
-      el.removeEventListener('pointercancel', onPointerUp);
-      el.classList.remove('dragging');
-      el.style.transform = '';
-      if (dragging) {
-        const handRow = document.getElementById('handRow');
-        const centers = [...handRow.children]
-          .filter((child, i) => i !== index)
-          .map(child => {
-            const rect = child.getBoundingClientRect();
-            return rect.left + rect.width / 2;
-          });
-        const dropIndex = computeDropIndex(centers, e.clientX);
-        state.handOrder = moveItem(state.handOrder, index, dropIndex);
-        renderHand(false);
-      } else {
-        selectTile(state.handOrder[index]);
-      }
-      setTimeout(() => { el._wasDragged = false; }, 50);
-      dragging = false;
-      pointerId = null;
-    }
-
+  function attachTileDrag(el) {
     el.addEventListener('pointerdown', (e) => {
-      pointerId = e.pointerId;
-      startX = e.clientX; startY = e.clientY;
-      dragging = false;
+      if (e.button !== undefined && e.button !== 0) return;
+      const handRow = document.getElementById('handRow');
+      const fromIndex = Array.from(handRow.children).indexOf(el);
+      const pointerId = e.pointerId;
+      const startX = e.clientX, startY = e.clientY;
+      const startRect = el.getBoundingClientRect();
+      let dragging = false;
+      let placeholder = null;
+      let placeholderIndex = fromIndex;
+
+      function teardown() {
+        el.removeEventListener('pointermove', onPointerMove);
+        el.removeEventListener('pointerup', onPointerUp);
+        el.removeEventListener('pointercancel', onPointerCancel);
+        if (placeholder && placeholder.parentNode) placeholder.remove();
+        if (el.parentNode === document.body) el.remove();
+        el.classList.remove('dragging');
+        el.style.position = '';
+        el.style.left = '';
+        el.style.top = '';
+        el.style.width = '';
+        el.style.height = '';
+        el.style.transform = '';
+      }
+
+      function onPointerMove(ev) {
+        if (ev.pointerId !== pointerId) return;
+        const dx = ev.clientX - startX;
+        const dy = ev.clientY - startY;
+        if (!dragging && (Math.abs(dx) > 6 || Math.abs(dy) > 6)) {
+          dragging = true;
+          el.classList.add('dragging');
+          // Pull the tile out of the flex flow so the gap it leaves behind
+          // closes immediately, and drop a dashed placeholder in its place
+          // that we'll slide around live to preview the drop position.
+          placeholder = document.createElement('div');
+          placeholder.className = 'tile drag-placeholder';
+          placeholder.style.width = startRect.width + 'px';
+          placeholder.style.height = startRect.height + 'px';
+          handRow.replaceChild(placeholder, el);
+          el.style.position = 'fixed';
+          el.style.width = startRect.width + 'px';
+          el.style.left = startRect.left + 'px';
+          el.style.top = startRect.top + 'px';
+          document.body.appendChild(el);
+          activeDrag = { teardown };
+        }
+        if (!dragging) return;
+        ev.preventDefault();
+        el.style.left = (startRect.left + dx) + 'px';
+        el.style.top = (startRect.top + dy - 14) + 'px';
+        el.style.transform = 'scale(1.08)';
+
+        // Live-preview reorder: find where the pointer sits relative to the
+        // other tiles' current midpoints and slide the placeholder there.
+        const siblings = Array.from(handRow.children).filter(c => c !== placeholder);
+        let targetIndex = siblings.length;
+        for (let i = 0; i < siblings.length; i++) {
+          const r = siblings[i].getBoundingClientRect();
+          if (ev.clientX < r.left + r.width / 2) { targetIndex = i; break; }
+        }
+        if (targetIndex !== placeholderIndex) {
+          const firstRects = new Map();
+          for (const c of siblings) firstRects.set(c, c.getBoundingClientRect());
+          handRow.insertBefore(placeholder, siblings[targetIndex] || null);
+          flipSiblings(siblings, firstRects);
+          placeholderIndex = targetIndex;
+        }
+      }
+
+      function onPointerUp(ev) {
+        if (ev.pointerId !== pointerId) return;
+        activeDrag = null;
+        if (dragging) {
+          teardown();
+          state.handOrder = moveItem(state.handOrder, fromIndex, placeholderIndex);
+          renderHand(false);
+        } else {
+          teardown();
+          selectTile(state.handOrder[fromIndex]);
+        }
+      }
+
+      function onPointerCancel(ev) {
+        if (ev.pointerId !== pointerId) return;
+        activeDrag = null;
+        teardown();
+        renderHand(false);
+      }
+
       try { el.setPointerCapture(pointerId); } catch { /* ignore unsupported browsers */ }
       el.addEventListener('pointermove', onPointerMove);
       el.addEventListener('pointerup', onPointerUp);
-      el.addEventListener('pointercancel', onPointerUp);
+      el.addEventListener('pointercancel', onPointerCancel);
     });
   }
 
   function selectTile(tile) {
+    if (state.fishingLocked) return; // hand is locked — only the forced drawn tile may be discarded
     state.selectedTile = state.selectedTile === tile ? null : tile;
     renderGame();
   }
@@ -1412,6 +1591,9 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
 
     if (isMyTurn && !needsToDraw) {
       // Already drew (or claimed) this turn — decide what to discard.
+      // While fishing, state.selectedTile is force-set (see renderGame) to the
+      // tile just drawn and can't be changed (see selectTile's fishingLocked
+      // guard), so this button just fires the forced discard.
       const discardBtn = document.createElement('button');
       discardBtn.textContent = state.selectedTile ? `Discard ${formatTile(state.selectedTile)}` : 'Select a tile to discard';
       discardBtn.disabled = !state.selectedTile;
@@ -1422,6 +1604,20 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
       });
       bar.appendChild(discardBtn);
 
+      if (!me.fishing) {
+        const fishBtn = document.createElement('button');
+        fishBtn.className = 'secondary';
+        fishBtn.textContent = '🎣 Declare Fishing';
+        fishBtn.disabled = !state.selectedTile;
+        fishBtn.title = 'Lock your hand as one-away-from-winning: this discard is final, and every tile you draw from now on is discarded automatically unless it wins.';
+        fishBtn.addEventListener('click', () => {
+          const tile = state.selectedTile;
+          state.selectedTile = null;
+          guardedSend({ type: 'declare_fishing', tile });
+        });
+        bar.appendChild(fishBtn);
+      }
+
       const winBtn = document.createElement('button');
       winBtn.className = 'secondary';
       winBtn.textContent = 'Declare Mahjong';
@@ -1431,23 +1627,25 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     }
 
     if (canClaim) {
-      const pungBtn = document.createElement('button');
-      pungBtn.className = 'secondary';
-      pungBtn.textContent = 'Pung';
-      pungBtn.addEventListener('click', () => guardedSend({ type: 'claim_pung' }));
-      bar.appendChild(pungBtn);
+      if (!me.fishing) {
+        const pungBtn = document.createElement('button');
+        pungBtn.className = 'secondary';
+        pungBtn.textContent = 'Pung';
+        pungBtn.addEventListener('click', () => guardedSend({ type: 'claim_pung' }));
+        bar.appendChild(pungBtn);
 
-      const kongBtn = document.createElement('button');
-      kongBtn.className = 'secondary';
-      kongBtn.textContent = 'Kong';
-      kongBtn.addEventListener('click', () => guardedSend({ type: 'claim_kong' }));
-      bar.appendChild(kongBtn);
+        const kongBtn = document.createElement('button');
+        kongBtn.className = 'secondary';
+        kongBtn.textContent = 'Kong';
+        kongBtn.addEventListener('click', () => guardedSend({ type: 'claim_kong' }));
+        bar.appendChild(kongBtn);
 
-      const chowBtn = document.createElement('button');
-      chowBtn.className = 'secondary';
-      chowBtn.textContent = 'Chow';
-      chowBtn.addEventListener('click', () => guardedSend({ type: 'claim_chow' }));
-      bar.appendChild(chowBtn);
+        const chowBtn = document.createElement('button');
+        chowBtn.className = 'secondary';
+        chowBtn.textContent = 'Chow';
+        chowBtn.addEventListener('click', () => guardedSend({ type: 'claim_chow' }));
+        bar.appendChild(chowBtn);
+      }
 
       const winBtn = document.createElement('button');
       winBtn.className = 'secondary';
@@ -1484,6 +1682,32 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
   // Game menu button → back to dashboard
   document.getElementById('gameMenuBtn').addEventListener('click', () => {
     if (confirm('Leave the game and return to dashboard?')) returnToDashboard();
+  });
+
+  // Rules modal — house rules + the full special-hands catalog, opened from
+  // either the dashboard or the in-game header.
+  function openRulesModal() {
+    document.getElementById('rulesOverlay').classList.add('active');
+  }
+  document.getElementById('dashRulesBtn').addEventListener('click', openRulesModal);
+  document.getElementById('gameRulesBtn').addEventListener('click', openRulesModal);
+  document.getElementById('rulesCloseBtn').addEventListener('click', () => {
+    document.getElementById('rulesOverlay').classList.remove('active');
+  });
+  document.getElementById('rulesOverlay').addEventListener('click', () => {
+    document.getElementById('rulesOverlay').classList.remove('active');
+  });
+  document.getElementById('rulesTabHouse').addEventListener('click', () => {
+    document.getElementById('rulesTabHouse').classList.add('active');
+    document.getElementById('rulesTabHands').classList.remove('active');
+    document.getElementById('rulesBodyHouse').style.display = '';
+    document.getElementById('rulesBodyHands').style.display = 'none';
+  });
+  document.getElementById('rulesTabHands').addEventListener('click', () => {
+    document.getElementById('rulesTabHands').classList.add('active');
+    document.getElementById('rulesTabHouse').classList.remove('active');
+    document.getElementById('rulesBodyHands').style.display = '';
+    document.getElementById('rulesBodyHouse').style.display = 'none';
   });
 
   // End Game (host only) — permanently ends the match for everyone at the table

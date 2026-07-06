@@ -328,4 +328,89 @@ describe('WebSocket game flow', () => {
 
     sockets.forEach(s => s.close());
   });
+
+  test('declare_fishing rejects non-tenpai hands, locks the hand once accepted, blocks melds, and forces every future discard to the tile just drawn', async () => {
+    const sockets = [];
+    for (let i = 0; i < 4; i++) sockets.push(await connect());
+
+    const createPromise = waitForMessage(sockets[0], m => m.type === 'room_created');
+    sockets[0].send(JSON.stringify({ type: 'create_room', playerId: 'fish-p0', displayName: 'P0' }));
+    const created = await createPromise;
+    const roomCode = created.roomCode;
+
+    for (let i = 1; i < 4; i++) {
+      const joinPromise = waitForMessage(sockets[i], m => m.type === 'room_state');
+      sockets[i].send(JSON.stringify({ type: 'join_room', roomCode, playerId: `fish-p${i}`, displayName: `P${i}` }));
+      await joinPromise;
+    }
+    await waitForMessage(sockets[0], m => m.type === 'game_started');
+
+    const room = rooms.get(roomCode);
+    const dealer = room.players.find(p => p.seat === room.round.dealerSeat);
+    const dealerSocket = sockets[room.players.indexOf(dealer)];
+
+    // The real, randomly-dealt opening hand is essentially never tenpai — declaring
+    // fishing on it should be rejected rather than silently locking a dead hand.
+    const rejectPromise = waitForMessage(dealerSocket, m => m.type === 'error');
+    dealerSocket.send(JSON.stringify({ type: 'declare_fishing', tile: dealer.hand[0] }));
+    const rejected = await rejectPromise;
+    assert.match(rejected.message, /not one tile away/);
+    assert.equal(dealer.fishing, false);
+
+    // Overwrite the dealer's hand with an engineered tenpai hand (waiting on a 9D
+    // pair) so we can test the acceptance path deterministically.
+    dealer.hand = ['1D', '1D', '1D', '2D', '3D', '4D', '2B', '2B', '2B', '3C', '4C', '5C', '9D', '9D'];
+
+    const fishingBroadcasts = sockets.map(s => waitForMessage(s, m => m.type === 'player_fishing'));
+    dealerSocket.send(JSON.stringify({ type: 'declare_fishing', tile: '9D' }));
+    const fishingMsgs = await Promise.all(fishingBroadcasts);
+    for (const msg of fishingMsgs) assert.equal(msg.seat, dealer.seat);
+
+    assert.equal(dealer.fishing, true);
+    assert.equal(dealer.hand.length, 13);
+    assert.equal(room.currentDiscard.tile, '9D');
+    assert.equal(room.currentDiscard.fromSeat, dealer.seat);
+    assert.notEqual(room.turnSeat, dealer.seat);
+
+    // A fishing player cannot call melds, even before any other eligibility check runs.
+    const meldRejectPromise = waitForMessage(dealerSocket, m => m.type === 'error');
+    dealerSocket.send(JSON.stringify({ type: 'claim_pung' }));
+    const meldRejected = await meldRejectPromise;
+    assert.match(meldRejected.message, /cannot call melds/);
+
+    // Cycle the other 3 seats through a normal draw+discard so play comes back
+    // around to the fishing dealer.
+    for (let i = 0; i < 3; i++) {
+      const turnPlayer = room.players.find(p => p.seat === room.turnSeat);
+      const turnSocket = sockets[room.players.indexOf(turnPlayer)];
+      const drawAck = waitForMessage(turnSocket, m => m.type === 'room_state');
+      turnSocket.send(JSON.stringify({ type: 'draw' }));
+      await drawAck;
+      const drawnHand = room.players.find(p => p.seat === turnPlayer.seat).hand;
+      const discardAck = waitForMessage(turnSocket, m => m.type === 'room_state');
+      turnSocket.send(JSON.stringify({ type: 'discard', tile: drawnHand[drawnHand.length - 1] }));
+      await discardAck;
+    }
+    assert.equal(room.turnSeat, dealer.seat, 'play should have cycled back to the fishing dealer');
+
+    // Dealer draws again — the lock means only that exact tile may be discarded.
+    const dealerDrawAck = waitForMessage(dealerSocket, m => m.type === 'room_state');
+    dealerSocket.send(JSON.stringify({ type: 'draw' }));
+    await dealerDrawAck;
+    const relockedDealer = room.players.find(p => p.seat === dealer.seat);
+    const drawnTile = relockedDealer.hand[relockedDealer.hand.length - 1];
+    const wrongTile = relockedDealer.hand.find(t => t !== drawnTile);
+
+    const wrongDiscardReject = waitForMessage(dealerSocket, m => m.type === 'error');
+    dealerSocket.send(JSON.stringify({ type: 'discard', tile: wrongTile }));
+    const wrongRejected = await wrongDiscardReject;
+    assert.match(wrongRejected.message, /can only discard the tile you just drew/);
+
+    const forcedDiscardAck = waitForMessage(dealerSocket, m => m.type === 'room_state');
+    dealerSocket.send(JSON.stringify({ type: 'discard', tile: drawnTile }));
+    await forcedDiscardAck;
+    assert.equal(room.currentDiscard.tile, drawnTile);
+
+    sockets.forEach(s => s.close());
+  });
 });

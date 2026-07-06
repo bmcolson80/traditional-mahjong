@@ -350,6 +350,7 @@ function publicRoomView(room, forSeat) {
       flowers: p.flowers,
       isAI: p.isAI ?? false,
       aiSkill: p.aiSkill ?? null,
+      fishing: p.fishing ?? false,
       hand: p.seat === forSeat ? p.hand : undefined,
     })),
   };
@@ -590,12 +591,14 @@ function executeAiClaims(room) {
 function executeAiWin(room, player, selfDraw, winningTile, discarderSeat) {
   const wTile   = winningTile ?? player.hand[player.hand.length - 1];
   const hCheck  = selfDraw ? player.hand.slice(0, -1) : player.hand;
-  const result  = G.checkWin(hCheck, player.exposed, wTile);
-  if (!result.win) return;
   const roundWind = G.getRoundWind(room);
   const seatWind  = G.getSeatWind(room, player.seat);
-  const score     = G.scoreHand(player, player.exposed, hCheck, wTile, { selfDraw, roundWind, seatWind, handType: result.type });
-  const settlement = G.settleScore(room, player.seat, score.fan, { selfDraw, discarderSeat });
+  const result  = G.checkWin(hCheck, player.exposed, wTile, { ownWind: seatWind, selfDraw });
+  if (!result.win) return;
+  const score     = G.scoreHand(player, player.exposed, hCheck, wTile, {
+    selfDraw, roundWind, seatWind, handType: result.type, tier: result.tier, specialName: result.specialName, isFishing: player.fishing,
+  });
+  const settlement = G.settleScore(room, player.seat, score.chips, { selfDraw, discarderSeat });
   G.advanceHand(room, { winnerSeat: player.seat });
   room.phase = 'finished';
   // Bankruptcy house rule: the moment any payer's chips hit 0 or below, the match ends instantly.
@@ -745,11 +748,39 @@ function handleMessage(ws, msg) {
       const player = requirePlayer(room, meta.playerId);
       if (room.phase !== 'playing') throw new Error('This hand is no longer in progress');
       if (room.turnSeat !== player.seat) throw new Error('Not your turn');
+      // Fishing lock: once declared, the hand is frozen — the only tile this
+      // player may ever discard again is whatever they just drew (or they win).
+      if (player.fishing && msg.tile !== player.hand[player.hand.length - 1]) {
+        throw new Error('You are fishing — you can only discard the tile you just drew');
+      }
       G.discardTile(room, player, msg.tile);
       room.turnSeat = G.nextSeat(player.seat, room.players.map(p => p.seat));
       persistRoom(room);
       broadcastRoomState(room);
       broadcast(room, { type: 'tile_discarded', tile: msg.tile, fromSeat: player.seat });
+      scheduleAiClaims(room);
+      break;
+    }
+    case 'declare_fishing': {
+      const room = requireRoom(meta);
+      const player = requirePlayer(room, meta.playerId);
+      if (room.phase !== 'playing') throw new Error('This hand is no longer in progress');
+      if (room.turnSeat !== player.seat) throw new Error('Not your turn');
+      if (player.fishing) throw new Error('You are already fishing');
+      const idx = player.hand.indexOf(msg.tile);
+      if (idx === -1) throw new Error('Tile not in hand');
+      const remaining = player.hand.slice();
+      remaining.splice(idx, 1);
+      if (!G.isTenpai(remaining, player.exposed, { ownWind: G.getSeatWind(room, player.seat) })) {
+        throw new Error('Hand is not one tile away from winning — cannot declare fishing yet');
+      }
+      player.fishing = true;
+      G.discardTile(room, player, msg.tile);
+      room.turnSeat = G.nextSeat(player.seat, room.players.map(p => p.seat));
+      persistRoom(room);
+      broadcastRoomState(room);
+      broadcast(room, { type: 'tile_discarded', tile: msg.tile, fromSeat: player.seat });
+      broadcast(room, { type: 'player_fishing', playerId: player.playerId, seat: player.seat });
       scheduleAiClaims(room);
       break;
     }
@@ -783,6 +814,7 @@ function handleMessage(ws, msg) {
       if (room.phase !== 'playing') throw new Error('This hand is no longer in progress');
       clearAiTimeout(room); // human beat the AI to the claim
       const player = requirePlayer(room, meta.playerId);
+      if (player.fishing) throw new Error('You are fishing and cannot call melds');
       if (!room.currentDiscard) throw new Error('No discard to claim');
       const { tile, fromSeat } = room.currentDiscard;
       if (!G.canPung(player.hand, tile)) throw new Error('Cannot pung this tile');
@@ -798,6 +830,7 @@ function handleMessage(ws, msg) {
       if (room.phase !== 'playing') throw new Error('This hand is no longer in progress');
       clearAiTimeout(room);
       const player = requirePlayer(room, meta.playerId);
+      if (player.fishing) throw new Error('You are fishing and cannot call melds');
       const concealed = Boolean(msg.concealed);
       let tile = msg.tile;
       let fromSeat = player.seat;
@@ -819,6 +852,7 @@ function handleMessage(ws, msg) {
       if (room.phase !== 'playing') throw new Error('This hand is no longer in progress');
       clearAiTimeout(room);
       const player = requirePlayer(room, meta.playerId);
+      if (player.fishing) throw new Error('You are fishing and cannot call melds');
       if (!room.currentDiscard) throw new Error('No discard to claim');
       const { tile, fromSeat } = room.currentDiscard;
       const options = G.canChow(player.hand, tile, player.seat, fromSeat);
@@ -850,7 +884,9 @@ function handleMessage(ws, msg) {
         });
         throw new Error(`Hand has ${handForCheck.length} tiles (plus winning tile), expected ${expectedLen} — this is a bug, please report it with this exact message`);
       }
-      const result = G.checkWin(handForCheck, player.exposed, winningTile);
+      const roundWind = G.getRoundWind(room);
+      const seatWind = G.getSeatWind(room, player.seat);
+      const result = G.checkWin(handForCheck, player.exposed, winningTile, { ownWind: seatWind, selfDraw });
       if (!result.win) {
         // Log full detail server-side and echo a compact version to the client so a
         // "why didn't this work" report comes with exact ground truth instead of a screenshot guess.
@@ -864,12 +900,10 @@ function handleMessage(ws, msg) {
         throw new Error('Hand does not qualify for Mahjong — hand: [' + detail.hand.join(',') +
           '] + winning tile ' + winningTile + (player.exposed.length ? ', exposed: ' + JSON.stringify(detail.exposed) : ''));
       }
-      const roundWind = G.getRoundWind(room);
-      const seatWind = G.getSeatWind(room, player.seat);
       const score = G.scoreHand(player, player.exposed, handForCheck, winningTile, {
-        selfDraw, roundWind, seatWind, handType: result.type,
+        selfDraw, roundWind, seatWind, handType: result.type, tier: result.tier, specialName: result.specialName, isFishing: player.fishing,
       });
-      const settlement = G.settleScore(room, player.seat, score.fan, {
+      const settlement = G.settleScore(room, player.seat, score.chips, {
         selfDraw, discarderSeat: room.currentDiscard?.fromSeat,
       });
       G.advanceHand(room, { winnerSeat: player.seat });

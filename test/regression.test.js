@@ -210,7 +210,7 @@ describe('regression: chip settlement house rules', () => {
   test('self-draw win: all active players pay base chip value + 1 each (non-dealer winner)', () => {
     const room = freshRoom('CH1');
     // winner S is not the dealer (E is dealer) — no dealer-win doubling applies.
-    G.settleScore(room, 'S', 2, { selfDraw: true }); // fan 2 → base 4 chips
+    G.settleScore(room, 'S', G.fanToChips(2), { selfDraw: true }); // fan 2 → base 4 chips
     const south = room.players.find(p => p.seat === 'S');
     const east = room.players.find(p => p.seat === 'E');   // dealer, pays double the BASE as a non-winning-dealer payer
     const west = room.players.find(p => p.seat === 'W');
@@ -223,7 +223,7 @@ describe('regression: chip settlement house rules', () => {
 
   test('discard win: only the discarder pays, everyone else pays nothing', () => {
     const room = freshRoom('CH2');
-    G.settleScore(room, 'S', 3, { selfDraw: false, discarderSeat: 'W' }); // fan 3 → base 8 chips
+    G.settleScore(room, 'S', G.fanToChips(3), { selfDraw: false, discarderSeat: 'W' }); // fan 3 → base 8 chips
     const south = room.players.find(p => p.seat === 'S');
     const east = room.players.find(p => p.seat === 'E');
     const west = room.players.find(p => p.seat === 'W');
@@ -236,7 +236,7 @@ describe('regression: chip settlement house rules', () => {
 
   test('discard win: dealer-as-discarder pays double when a non-dealer wins', () => {
     const room = freshRoom('CH3');
-    G.settleScore(room, 'S', 1, { selfDraw: false, discarderSeat: 'E' }); // fan 1 → base 2 chips, E is dealer
+    G.settleScore(room, 'S', G.fanToChips(1), { selfDraw: false, discarderSeat: 'E' }); // fan 1 → base 2 chips, E is dealer
     const south = room.players.find(p => p.seat === 'S');
     const east = room.players.find(p => p.seat === 'E');
     assert.equal(east.score, -4, 'dealer discarder pays double the standard base amount');
@@ -245,7 +245,7 @@ describe('regression: chip settlement house rules', () => {
 
   test('dealer win: base portion of the payout is doubled (first win, no streak yet)', () => {
     const room = freshRoom('CH4');
-    G.settleScore(room, 'E', 2, { selfDraw: true }); // fan 2 → base 4, dealer wins self-draw
+    G.settleScore(room, 'E', G.fanToChips(2), { selfDraw: true }); // fan 2 → base 4, dealer wins self-draw
     const east = room.players.find(p => p.seat === 'E');
     const others = room.players.filter(p => p.seat !== 'E');
     // base(4) * 2 [dealer-win double] * 1 [streak multiplier, first win] = 8, + flat 1 self-draw bonus = 9 per opponent
@@ -255,11 +255,11 @@ describe('regression: chip settlement house rules', () => {
 
   test('dealer win streak multiplies the base portion further on consecutive wins', () => {
     const room = freshRoom('CH5');
-    const firstGain = G.settleScore(room, 'E', 1, { selfDraw: true }).standings.find(s => s.seat === 'E').score;
+    const firstGain = G.settleScore(room, 'E', G.fanToChips(1), { selfDraw: true }).standings.find(s => s.seat === 'E').score;
     G.advanceHand(room, { winnerSeat: 'E' }); // dealer retains seat, streak becomes 1
     assert.equal(room.round.dealerStreak, 1);
     const beforeSecond = room.players.find(p => p.seat === 'E').score;
-    G.settleScore(room, 'E', 1, { selfDraw: true }); // same fan again, now with streak multiplier x2
+    G.settleScore(room, 'E', G.fanToChips(1), { selfDraw: true }); // same fan again, now with streak multiplier x2
     const afterSecond = room.players.find(p => p.seat === 'E').score;
     const secondGain = afterSecond - beforeSecond;
     // Per-opponent amount = base(2) * 2[dealer-win double] * streakMultiplier + flat 1, summed over 3 opponents.
@@ -270,7 +270,7 @@ describe('regression: chip settlement house rules', () => {
   // Direct verification against the rulebook's own worked examples (section 7).
   test('matches rulebook Example 1: 2-fan discard win, only the discarder pays 4 chips', () => {
     const room = freshRoom('CHEX1');
-    G.settleScore(room, 'S', 2, { selfDraw: false, discarderSeat: 'W' });
+    G.settleScore(room, 'S', G.fanToChips(2), { selfDraw: false, discarderSeat: 'W' });
     assert.equal(room.players.find(p => p.seat === 'W').score, -4);
     assert.equal(room.players.find(p => p.seat === 'E').score, 0, 'dealer pays nothing on a discard win it has no part in');
     assert.equal(room.players.find(p => p.seat === 'S').score, 4);
@@ -278,7 +278,7 @@ describe('regression: chip settlement house rules', () => {
 
   test('matches rulebook Example 2: dealer self-draw 3-fan (8 base) doubles to 16, +1 flat = 17/opponent, 34 total', () => {
     const room = freshRoom('CHEX2');
-    G.settleScore(room, 'E', 3, { selfDraw: true }); // E is dealer
+    G.settleScore(room, 'E', G.fanToChips(3), { selfDraw: true }); // E is dealer
     const east = room.players.find(p => p.seat === 'E');
     const others = room.players.filter(p => p.seat !== 'E');
     others.forEach(p => assert.equal(p.score, -17, 'doubled base (16) + flat self-draw bonus (1) = 17'));
@@ -297,7 +297,7 @@ describe('regression: chip settlement house rules', () => {
     const room = freshRoom('CH7');
     const west = room.players.find(p => p.seat === 'W');
     west.score = 5; // West is nearly broke
-    const settlement = G.settleScore(room, 'S', 3, { selfDraw: false, discarderSeat: 'W' }); // base 8 > 5
+    const settlement = G.settleScore(room, 'S', G.fanToChips(3), { selfDraw: false, discarderSeat: 'W' }); // base 8 > 5
     assert.ok(settlement.bankruptSeats.includes('W'), 'West should be flagged bankrupt after paying more than they had');
     assert.ok(west.score <= 0);
   });
@@ -306,7 +306,7 @@ describe('regression: chip settlement house rules', () => {
     const room = freshRoom('CH8');
     const west = room.players.find(p => p.seat === 'W');
     west.score = 500; // plenty of chips
-    const settlement = G.settleScore(room, 'S', 1, { selfDraw: false, discarderSeat: 'W' }); // base 2, well within balance
+    const settlement = G.settleScore(room, 'S', G.fanToChips(1), { selfDraw: false, discarderSeat: 'W' }); // base 2, well within balance
     assert.equal(settlement.bankruptSeats.length, 0);
     assert.ok(west.score > 0);
   });

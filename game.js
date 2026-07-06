@@ -5,6 +5,8 @@
 //   Dragons: "RD" (Red), "GD" (Green), "WD" (White)
 //   Flowers: "F1".."F4"   Seasons: "S1".."S4"
 
+import { matchSpecialHands, TIER_CHIPS, TIER_FISHING_CHIPS } from './special-hands.js';
+
 const SUITS = ['D', 'B', 'C'];
 const WINDS = ['EW', 'SW', 'WW', 'NW'];
 const DRAGONS = ['RD', 'GD', 'WD'];
@@ -151,14 +153,16 @@ export function fanToChips(fan) {
 //    the dealer-win double above — the flat self-draw +1 is never scaled by this.
 //  - Bankruptcy: if any payer's chips hit 0 or below, `bankruptSeats` is returned
 //    non-empty so the caller can end the match immediately.
-export function settleScore(room, winnerSeat, fan, { selfDraw, discarderSeat } = {}) {
+// `base` is the already-resolved base chip value for the win — pass scoreHand's
+// `chips` field directly (it's pre-computed there via fanToChips for ordinary
+// hands, or via the special-hand tier table for named catalog hands).
+export function settleScore(room, winnerSeat, base, { selfDraw, discarderSeat } = {}) {
   const winner = room.players.find(p => p.seat === winnerSeat);
   const others = room.players.filter(p => p.seat !== winnerSeat);
   const dealerSeat = room.round.dealerSeat;
   const winnerIsDealer = winnerSeat === dealerSeat;
   const streak = room.round.dealerStreak ?? 0;
   const streakMultiplier = winnerIsDealer ? streak + 1 : 1;
-  const base = fanToChips(fan);
 
   let winnerGain = 0;
   const bankruptSeats = [];
@@ -222,6 +226,7 @@ export function startGame(room) {
     p.hand = [];
     p.exposed = [];
     p.flowers = [];
+    p.fishing = false;
     // note: p.score is intentionally NOT reset here so it carries across hands/rounds
   }
 
@@ -357,16 +362,43 @@ function takeFromHand(hand, tile, count) {
 
 // ---------- Win detection ----------
 
-// Standard hand: 4 sets (pung/chow/kong) + 1 pair, built from exposed sets + concealed hand + winning tile
-export function checkWin(hand, exposed, winningTile) {
+// Standard hand: 4 sets (pung/chow/kong) + 1 pair, built from exposed sets + concealed hand + winning tile.
+// When several interpretations of the same 14 tiles are all technically valid
+// (e.g. a hand that's both a plain standard hand AND a named special hand from
+// the Western-hands catalog), the winner is always scored on their BEST available
+// interpretation — standard practice — so every candidate is ranked by its chip
+// value and the highest wins. `ctx` (optional) carries `ownWind`/`selfDraw` for
+// special hands that need them (see special-hands.js).
+export function checkWin(hand, exposed, winningTile, ctx = {}) {
   const fullConcealed = [...hand, winningTile].sort();
   const setsNeeded = 4 - exposed.length;
+  const candidates = [];
 
-  if (isSevenPairs(fullConcealed) && exposed.length === 0) return { win: true, type: 'seven_pairs' };
-  if (isThirteenOrphans(fullConcealed) && exposed.length === 0) return { win: true, type: 'thirteen_orphans' };
-  if (canDecompose(fullConcealed, setsNeeded)) return { win: true, type: 'standard' };
+  for (const s of matchSpecialHands(hand, exposed, winningTile, ctx)) {
+    candidates.push({ type: `special:${s.key}`, specialName: s.name, tier: s.tier, rank: TIER_CHIPS[s.tier] });
+  }
+  if (isThirteenOrphans(fullConcealed) && exposed.length === 0) candidates.push({ type: 'thirteen_orphans', rank: 64 });
+  if (isSevenPairs(fullConcealed) && exposed.length === 0) candidates.push({ type: 'seven_pairs', rank: 0 });
+  if (canDecompose(fullConcealed, setsNeeded)) candidates.push({ type: 'standard', rank: 0 });
 
-  return { win: false };
+  if (candidates.length === 0) return { win: false };
+  candidates.sort((a, b) => b.rank - a.rank);
+  const best = candidates[0];
+  return { win: true, type: best.type, specialName: best.specialName, tier: best.tier };
+}
+
+const ALL_TILE_TYPES = [
+  ...SUITS.flatMap(suit => Array.from({ length: 9 }, (_, i) => `${i + 1}${suit}`)),
+  ...WINDS,
+  ...DRAGONS,
+];
+
+// Whether `hand` (concealed tiles, NOT including a winning tile — same shape
+// declare_win passes to checkWin) is one real tile away from a valid Mahjong.
+// Used to gate the "fishing" declaration: locking the hand only makes sense if
+// the player is genuinely tenpai.
+export function isTenpai(hand, exposed, ctx = {}) {
+  return ALL_TILE_TYPES.some(candidate => checkWin(hand, exposed, candidate, ctx).win);
 }
 
 function isSevenPairs(tiles) {
@@ -458,12 +490,27 @@ function removeN(tiles, tile, n) {
 // A fan-count scorer covering common traditional categories plus the table's house rules:
 //   All Chows = 2 fan, One Suit + Honors = 3 fan, All Pungs = 3 fan, Pure One Suit = 6 fan,
 //   Thirteen Orphans = limit hand (fan pinned at cap → 64 chips), Chicken Hand (0 fan) = 1 chip.
-// Returns { fan, breakdown }. Pass handType from checkWin's result.type when available
-// ('standard' | 'seven_pairs' | 'thirteen_orphans') so special hands score correctly.
-export function scoreHand(player, exposed, concealedHand, winningTile, { selfDraw, roundWind, seatWind, handType = 'standard' } = {}) {
+//   Named special hands from the Western-hands catalog (special-hands.js) score on
+//   their own fixed tier instead of the fan scale — see TIER_CHIPS there.
+// Returns { fan, chips, breakdown } — `chips` is always the final resolved chip
+// value (callers should settle on `chips`, not re-derive it from `fan`). Pass
+// handType from checkWin's result.type ('standard' | 'seven_pairs' |
+// 'thirteen_orphans' | 'special:<key>'), and — for special hands — the `tier` and
+// `specialName` checkWin also returned. Pass `isFishing: player.fishing` so a
+// special hand completed while fishing scores its (lower) Fishing value instead
+// of the full Winning value, matching the book's own convention.
+export function scoreHand(player, exposed, concealedHand, winningTile, {
+  selfDraw, roundWind, seatWind, handType = 'standard', tier, specialName, isFishing = false,
+} = {}) {
   if (handType === 'thirteen_orphans') {
     // Limit hand — fan is pinned at the fanToChips cap (6+ = 64 chips), exact value beyond that doesn't matter.
-    return { fan: 6, breakdown: ['Thirteen Orphans (Limit Hand)'] };
+    return { fan: 6, chips: 64, breakdown: ['Thirteen Orphans (Limit Hand)'] };
+  }
+  if (handType.startsWith('special:') && tier) {
+    const chips = isFishing ? TIER_FISHING_CHIPS[tier] : TIER_CHIPS[tier];
+    const tierLabel = { half_limit: 'Half Limit', limit: 'Limit', middle_limit: 'Middle Limit', double_limit: 'Double Limit' }[tier];
+    const label = `${specialName} (${tierLabel})${isFishing ? ' — Fishing' : ''}`;
+    return { fan: null, chips, breakdown: [label] };
   }
 
   const allTiles = [...concealedHand, winningTile, ...exposed.flatMap(s => s.tiles)];
@@ -479,8 +526,9 @@ export function scoreHand(player, exposed, concealedHand, winningTile, { selfDra
   if (exposed.length === 0) { fan += 1; breakdown.push('Concealed Hand'); }
   if (selfDraw) { fan += 1; breakdown.push('Self-Drawn'); }
 
-  // All Chows / All Pungs require knowing how the concealed portion breaks down into sets,
-  // not just the exposed melds — only meaningful for standard (4 sets + pair) hands.
+  // All Chows / All Pungs / All Honour require knowing how the concealed portion
+  // breaks down into sets, not just the exposed melds — only meaningful for
+  // standard (4 sets + pair) hands.
   if (handType === 'standard') {
     const setsNeeded = 4 - exposed.length;
     const concealedAnalysis = analyzeSets([...concealedHand, winningTile].sort(), setsNeeded);
@@ -493,7 +541,14 @@ export function scoreHand(player, exposed, concealedHand, winningTile, { selfDra
 
       if (totalSets === 4) {
         if (exposedChows + concealedChows === 4) { fan += 2; breakdown.push('All Chows'); }
-        else if (exposedPungKongs + concealedPungs === 4) { fan += 3; breakdown.push('All Pungs'); }
+        else if (exposedPungKongs + concealedPungs === 4) {
+          fan += 3; breakdown.push('All Pungs');
+          // All Honour: every meld is a pung/kong AND every tile (melds + pair) is
+          // a terminal (1 or 9) or an honor — a stronger, rarer condition than
+          // "All Pungs" alone, worth an extra bonus on top.
+          const isTerminalOrHonor = t => isHonorTile(t) || t.slice(0, -1) === '1' || t.slice(0, -1) === '9';
+          if (allTiles.every(isTerminalOrHonor)) { fan += 3; breakdown.push('All Honour'); }
+        }
       }
     }
   }
@@ -506,7 +561,8 @@ export function scoreHand(player, exposed, concealedHand, winningTile, { selfDra
 
   if (fan === 0) breakdown.push('Chicken Hand'); // 0 fan → 1 chip via fanToChips
 
-  return { fan, breakdown };
+  return { fan, chips: fanToChips(fan), breakdown };
 }
 
+export { TIER_CHIPS, TIER_FISHING_CHIPS };
 export const constants = { SUITS, WINDS, DRAGONS, SEAT_ORDER, ORPHAN_TILES };
