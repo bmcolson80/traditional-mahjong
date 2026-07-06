@@ -1179,9 +1179,9 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
       let placeholderIndex = fromIndex;
 
       function teardown() {
-        el.removeEventListener('pointermove', onPointerMove);
-        el.removeEventListener('pointerup', onPointerUp);
-        el.removeEventListener('pointercancel', onPointerCancel);
+        window.removeEventListener('pointermove', onPointerMove);
+        window.removeEventListener('pointerup', onPointerUp);
+        window.removeEventListener('pointercancel', onPointerCancel);
         if (placeholder && placeholder.parentNode) placeholder.remove();
         if (el.parentNode === document.body) el.remove();
         el.classList.remove('dragging');
@@ -1258,10 +1258,17 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
         renderHand(false);
       }
 
+      // Listen on window, not `el`, for the rest of the gesture. Once the
+      // tile is reparented into <body> mid-drag (see onPointerMove above),
+      // pointer capture is not guaranteed to survive that reparent on every
+      // browser — if it's silently dropped, listeners bound to `el` alone
+      // never fire again, and the tile is left permanently stuck mid-air at
+      // its last dragged position. Binding to window (filtered by pointerId)
+      // guarantees delivery regardless of any DOM move or capture quirk.
       try { el.setPointerCapture(pointerId); } catch { /* ignore unsupported browsers */ }
-      el.addEventListener('pointermove', onPointerMove);
-      el.addEventListener('pointerup', onPointerUp);
-      el.addEventListener('pointercancel', onPointerCancel);
+      window.addEventListener('pointermove', onPointerMove);
+      window.addEventListener('pointerup', onPointerUp);
+      window.addEventListener('pointercancel', onPointerCancel);
     });
   }
 
