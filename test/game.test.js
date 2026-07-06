@@ -163,23 +163,71 @@ describe('win detection', () => {
   });
 
   test('detects seven pairs', () => {
-    const hand = ['1D','1D','2D','2D','3D','3D','4D','4D','5D','5D','6D','6D','7D'];
+    // Mixed suits so this can't also match a same-suit special hand (e.g. Heavenly
+    // Twins) — isolates the plain structural seven_pairs detection.
+    const hand = ['1D','1D','2B','2B','3C','3C','4D','4D','5B','5B','6C','6C','7D'];
     const win = G.checkWin(hand, [], '7D');
     assert.equal(win.win, true);
     assert.equal(win.type, 'seven_pairs');
   });
 
-  test('detects thirteen orphans', () => {
+  test('detects thirteen orphans (which the special-hands catalog also recognizes as the higher-scoring Unique Wonder)', () => {
+    // This exact 13-distinct-tiles-plus-one-duplicate shape is *also* precisely
+    // "Unique Wonder" from the special-hands catalog (ESWN + GRW + 1s/9s of each
+    // suit + any tile paired), just scored as a Double Limit hand instead of the
+    // classical Limit-hand treatment. checkWin always picks the winner's best
+    // available interpretation, so this now resolves to Unique Wonder rather than
+    // plain thirteen_orphans — that's intentional, not a regression.
     const hand = ['1D','9D','1B','9B','1C','9C','EW','SW','WW','NW','RD','GD','WD'];
     const win = G.checkWin(hand, [], '1D');
     assert.equal(win.win, true);
-    assert.equal(win.type, 'thirteen_orphans');
+    assert.equal(win.type, 'special:unique_wonder');
   });
 
   test('rejects a non-winning hand', () => {
     const hand = ['1D','2D','4D','5D','7D','8D','1B','2B','4B','5B','7B','8B','1C'];
     const win = G.checkWin(hand, [], '2C');
     assert.equal(win.win, false);
+  });
+
+  test('detects Five Odd Honours (pure 1-9 run in one suit + 5 distinct single honors)', () => {
+    // Exact hand from the bug report: this used to be rejected as "does not qualify".
+    const hand = ['1D','2D','3D','5D','6D','7D','8D','9D','EW','GD','NW','WD','WW'];
+    const win = G.checkWin(hand, [], '4D');
+    assert.equal(win.win, true);
+    assert.equal(win.type, 'special:five_odd_honours');
+    assert.equal(win.tier, 'half_limit');
+  });
+
+  test('does not mistake a duplicated honor tile for Five Odd Honours', () => {
+    // 6 honor tiles (one duplicated) instead of 5 distinct ones — must not match.
+    const hand = ['1D','2D','3D','4D','5D','6D','7D','8D','EW','EW','GD','NW','WD'];
+    const win = G.checkWin(hand, [], '9D');
+    assert.equal(win.win, false);
+  });
+
+  test('does not mistake a mixed-suit run for Five Odd Honours', () => {
+    // The suited run spans two suits (7 dots + 1 bamboo) instead of one pure suit.
+    const hand = ['1D','2D','3D','4D','5D','6D','7D','8B','EW','GD','NW','WD','WW'];
+    const win = G.checkWin(hand, [], '9D');
+    assert.equal(win.win, false);
+  });
+});
+
+describe('tenpai detection', () => {
+  test('a hand one tile away from Five Odd Honours is tenpai', () => {
+    const hand = ['1D','2D','3D','5D','6D','7D','8D','9D','EW','GD','NW','WD','WW'];
+    assert.equal(G.isTenpai(hand, []), true);
+  });
+
+  test('a standard hand waiting on a pair is tenpai', () => {
+    const hand = ['1D','1D','1D','2D','3D','4D','2B','2B','2B','3C','4C','5C','9D'];
+    assert.equal(G.isTenpai(hand, []), true);
+  });
+
+  test('a hand nowhere near complete is not tenpai', () => {
+    const hand = ['1D','4D','7D','1B','4B','7B','1C','4C','7C','EW','SW','WW','RD'];
+    assert.equal(G.isTenpai(hand, []), false);
   });
 });
 
@@ -234,6 +282,12 @@ describe('scoring', () => {
     const score = G.scoreHand({}, [], [], 'RD', { handType: 'thirteen_orphans' });
     assert.equal(G.fanToChips(score.fan), 64);
     assert.ok(score.breakdown.some(b => b.includes('Limit Hand')));
+  });
+
+  test('Five Odd Honours scores as a Half Limit hand (32 chips) per the special-hands catalog', () => {
+    const score = G.scoreHand({}, [], [], '4D', { handType: 'special:five_odd_honours', tier: 'half_limit', specialName: 'Five Odd Honours' });
+    assert.equal(score.chips, 32);
+    assert.ok(score.breakdown.some(b => b.includes('Five Odd Honours')));
   });
 
   test('Chicken Hand (0 fan) converts to exactly 1 chip', () => {
