@@ -1,0 +1,14 @@
+{
+  "name": "Traditional Mahjong",
+  "short_name": "Mahjong",
+  "description": "Real-time multiplayer Traditional Chinese Mahjong",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d2b1e",
+  "theme_color": "#0d2b1e",
+  "icons": [
+    { "src": "/icons/icon-192.png", "type": "image/png", "sizes": "192x192", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "type": "image/png", "sizes": "512x512", "purpose": "any" },
+    { "src": "/icons/icon-512-maskable.png", "type": "image/png", "sizes": "512x512", "purpose": "maskable" }
+  ]
+}
