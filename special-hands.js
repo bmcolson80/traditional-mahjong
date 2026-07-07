@@ -23,6 +23,7 @@ const WINDS = ['EW', 'SW', 'WW', 'NW'];
 const DRAGONS = ['RD', 'GD', 'WD'];
 // Dragon <-> suit correspondence used by several hands (Ruby Jade, Green Jade, etc.)
 const DRAGON_SUIT = { RD: 'C', GD: 'B', WD: 'D' }; // Red-Characters, Green-Bamboo, White-Circles
+const SUIT_DRAGON = { C: 'RD', B: 'GD', D: 'WD' }; // inverse of DRAGON_SUIT
 const GREEN_BAMBOO_NUMBERS = [2, 3, 4, 6, 8];
 const RED_BAMBOO_NUMBERS = [1, 5, 7, 9];
 
@@ -287,9 +288,9 @@ export const SPECIAL_HANDS = [
   },
   {
     key: 'red_lantern', name: 'Red Lantern', tier: 'double_limit', exposedTier: 'limit',
-    test: pool => tryEachSuit(pool, (c, suit) => {
+    test: (pool, ctx) => tryEachSuit(pool, (c, suit) => {
       const low = run(suit, 1, 7);
-      return takeRun(c, suit, 1, 7) && takeAnyDup(c, low) && takeMeld(c, 'RD') && takeMeldFromSet(c, WINDS) && empty(c);
+      return Boolean(ctx?.ownWind) && takeRun(c, suit, 1, 7) && takeAnyDup(c, low) && takeMeld(c, 'RD') && takeMeld(c, ctx.ownWind) && empty(c);
     }),
   },
   {
@@ -377,9 +378,18 @@ export const SPECIAL_HANDS = [
   // ---- Pairs ----
   {
     key: 'knitting', name: 'Knitting', tier: 'half_limit',
+    // Seven pairs, each pair being one tile of the same number in each of two
+    // suits — the number itself may repeat across pairs (e.g. two "8" pairs),
+    // per the reference sheet's own example (1,2,2,4,5,7,8).
     test: pool => tryEachSuitPair(pool, (c, a, b) => {
       let n = 0;
-      for (let num = 1; num <= 9; num++) if (take(c, tile(num, a)) && take(c, tile(num, b))) n++;
+      for (let num = 1; num <= 9; num++) {
+        while ((c[tile(num, a)] || 0) >= 1 && (c[tile(num, b)] || 0) >= 1) {
+          take(c, tile(num, a));
+          take(c, tile(num, b));
+          n++;
+        }
+      }
       return n === 7 && empty(c);
     }),
   },
@@ -404,12 +414,15 @@ export const SPECIAL_HANDS = [
   },
   {
     key: 'sparrows_sanctuary', name: "Sparrow's Sanctuary", tier: 'middle_limit',
-    test: pool => tryEachSuit(pool, (c, suit) => {
-      if (!(c[tile(1, suit)] === 4)) return false;
-      take(c, tile(1, suit), 4);
-      for (const n of GREEN_BAMBOO_NUMBERS) if (!takePair(c, tile(n, suit))) return false;
+    // Always Bamboo — the reference sheet lists this under "BAMBOO SUIT", not
+    // "any suit" (unlike most other named hands here).
+    test: pool => {
+      const c = counts(pool);
+      if (c['1B'] !== 4) return false;
+      take(c, '1B', 4);
+      for (const n of GREEN_BAMBOO_NUMBERS) if (!takePair(c, tile(n, 'B'))) return false;
       return empty(c);
-    }),
+    },
   },
   {
     key: 'heavenly_twins', name: 'Heavenly Twins', tier: 'limit',
@@ -430,22 +443,32 @@ export const SPECIAL_HANDS = [
   },
   {
     key: 'all_pair_honours', name: 'All Pair Honours', tier: 'limit',
+    // "Pairs of 1s & 9s only, Winds & Dragons only, or all combined" (reference
+    // sheet) — the 7 pairs may draw from terminals too, not just the 7 honor tiles.
     test: pool => {
       const c = counts(pool);
+      const candidates = [...WINDS, ...DRAGONS, ...SUITS.flatMap(s => [tile(1, s), tile(9, s)])];
       let pairs = 0;
-      for (const h of [...WINDS, ...DRAGONS]) if (takePair(c, h)) pairs++;
+      for (const t of candidates) if (takePair(c, t)) pairs++;
       return pairs === 7 && empty(c);
     },
   },
   {
     key: 'all_pair_jade', name: 'All Pair Jade', tier: 'limit', concealedOnly: false,
+    // "At least one Pair of Green Dragons" + "Five or Six Pairs of Green Bamboos"
+    // (reference sheet) — either 1 GD pair + 6 bamboo pairs, or all 4 GD (2 pairs)
+    // + 5 bamboo pairs.
     test: pool => {
       const c = counts(pool);
       // Six pairs from only 5 distinct numbers means one number contributes two
       // pairs (all 4 copies) — keep taking pairs from each number until exhausted.
       let pairs = 0;
       for (const n of GREEN_BAMBOO_NUMBERS) while (takePair(c, tile(n, 'B'))) pairs++;
-      return pairs === 6 && takePair(c, 'GD') && empty(c);
+      if (takePair(c, 'GD')) {
+        if (pairs === 6 && empty(c)) return true;
+        return pairs === 5 && takePair(c, 'GD') && empty(c);
+      }
+      return false;
     },
   },
   {
@@ -489,7 +512,7 @@ export const SPECIAL_HANDS = [
     key: 'golden_gates', name: 'Golden Gates', tier: 'limit', exposedTier: 'half_limit',
     test: pool => tryEachSuit(pool, (c, suit) => {
       for (const n of [2, 4, 6, 8]) if (!takePair(c, tile(n, suit))) return false;
-      return (takeMeld(c, tile(1, suit)) || takeMeld(c, tile(9, suit))) && takeMeldFromSet(c, DRAGONS) && empty(c);
+      return (takeMeld(c, tile(1, suit)) || takeMeld(c, tile(9, suit))) && takeMeld(c, SUIT_DRAGON[suit]) && empty(c);
     }),
   },
   {
@@ -539,9 +562,14 @@ export const SPECIAL_HANDS = [
   },
   {
     key: 'civil_war', name: 'Civil War', tier: 'middle_limit', concealedOnly: false,
-    test: pool => tryEachSuitPair(pool, (c, a, b) =>
-      takeMeld(c, 'NW') && takeMeld(c, 'SW') && takeMeldFromSet(c, run(a, 1, 9)) && takeMeldFromSet(c, run(b, 1, 9))
-      && takePairAnySuit(c) && empty(c)),
+    // Literal fixed shape per the reference sheet's diagram: "1, 8, 6, 1 in one
+    // suit" + "1, 8, 6, 5 in another suit" — not a meld/pair decomposition.
+    test: pool => tryEachSuitPair(pool, (c, a, b) => {
+      if (!takeMeld(c, 'NW') || !takeMeld(c, 'SW')) return false;
+      for (const n of [1, 1, 6, 8]) if (!take(c, tile(n, a))) return false;
+      for (const n of [1, 5, 6, 8]) if (!take(c, tile(n, b))) return false;
+      return empty(c);
+    }),
   },
   // ---- Dragons ----
   {

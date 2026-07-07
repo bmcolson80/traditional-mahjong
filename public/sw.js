@@ -4,8 +4,8 @@ self.addEventListener('push', (event) => {
   const title = data.title || 'Mahjong';
   const options = {
     body: data.body || '',
-    icon: '/icon.png',
-    badge: '/icon.png',
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
     data: data.url || '/',
   };
   event.waitUntil(self.registration.showNotification(title, options));
