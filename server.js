@@ -10,7 +10,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
 
-import { initDB, all, get, run } from './db.js';
+import { initDB, all, get, run, getDB, persist } from './db.js';
 import * as G from './game.js';
 import * as AI from './ai.js';
 
@@ -375,7 +375,15 @@ function serializeRoom(room) {
 
 function persistRoom(room) {
   try {
-    run(
+    // Use the raw DB handle (not the `run()` wrapper) for each statement so we don't
+    // trigger a full synchronous DB export+writeFileSync per statement — persist()
+    // is called once at the end instead. This used to be up to 2+N full-DB disk
+    // writes per call (upsert + delete + one insert per human player), and this
+    // function is called twice back-to-back when a 4-player game starts immediately
+    // (once after adding players, once after startGame), which was the main cause
+    // of "Create Game" hanging or taking a long time to respond.
+    const database = getDB();
+    database.run(
       `INSERT INTO games (room_code, phase, state_json) VALUES (?, ?, ?)
        ON CONFLICT(room_code) DO UPDATE SET phase = excluded.phase, state_json = excluded.state_json`,
       [room.code, room.phase, serializeRoom(room)]
@@ -383,10 +391,10 @@ function persistRoom(room) {
     // Refresh game_players so /api/my-games can find this user's active games
     const gameRow = get('SELECT id FROM games WHERE room_code = ?', [room.code]);
     if (gameRow) {
-      run('DELETE FROM game_players WHERE game_id = ?', [gameRow.id]);
+      database.run('DELETE FROM game_players WHERE game_id = ?', [gameRow.id]);
       for (const p of room.players) {
         if (p.userId) {
-          run(
+          database.run(
             `INSERT INTO game_players (game_id, user_id, player_id, seat, display_name)
              VALUES (?, ?, ?, ?, ?)`,
             [gameRow.id, p.userId, p.playerId, p.seat, p.displayName]
@@ -394,6 +402,7 @@ function persistRoom(room) {
         }
       }
     }
+    persist();
   } catch (err) {
     console.error('persistRoom failed:', err);
   }
@@ -433,7 +442,8 @@ wss.on('connection', (ws) => {
     try {
       handleMessage(ws, msg);
     } catch (err) {
-      console.error('handleMessage error:', err);
+      const meta = clients.get(ws);
+      console.error(`handleMessage error [type=${msg?.type}, room=${meta?.roomCode}, playerId=${meta?.playerId}]:`, err);
       send(ws, { type: 'error', message: err.message ?? 'Something went wrong' });
     }
   });

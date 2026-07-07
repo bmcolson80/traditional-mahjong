@@ -670,17 +670,14 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
       btn.style.margin = '0';
       const roomCode = game.roomCode;
       btn.addEventListener('click', function () {
-        if (!state.ws || state.ws.readyState !== WebSocket.OPEN) connectWS();
-        setTimeout(function () {
-          state.roomCode = roomCode;
-          state.isHost = false;
-          wsSend({
-            type: 'rejoin_room',
-            roomCode: roomCode,
-            playerId: state.playerId,
-            userId: state.user && state.user.id,
-          });
-        }, 150);
+        state.roomCode = roomCode;
+        state.isHost = false;
+        sendWhenConnected({
+          type: 'rejoin_room',
+          roomCode: roomCode,
+          playerId: state.playerId,
+          userId: state.user && state.user.id,
+        });
       });
       card.appendChild(btn);
       if (game.isHost) {
@@ -774,10 +771,47 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     state.ws.addEventListener('close', () => {
       console.log('WS disconnected');
     });
+    state.ws.addEventListener('error', (ev) => {
+      console.error('WS error:', ev);
+    });
   }
 
   function wsSend(msg) {
     if (state.ws && state.ws.readyState === WebSocket.OPEN) state.ws.send(JSON.stringify(msg));
+  }
+
+  // Buttons that need a live connection before sending (Create Game, Join Game, Rejoin)
+  // used to do `if (!state.ws) connectWS(); setTimeout(() => wsSend(...), 150)` — a blind
+  // 150ms guess. On a cold connection (slow network, sleeping Railway instance, etc) the
+  // socket often isn't OPEN yet after 150ms, and wsSend() silently drops the message with
+  // no retry and no feedback — the button just looks unresponsive. This waits for the
+  // actual 'open' event (or sends immediately if already open), with a bounded timeout so
+  // a truly dead connection surfaces an error instead of hanging forever.
+  function sendWhenConnected(msg, { timeoutMs = 8000 } = {}) {
+    if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+      wsSend(msg);
+      return;
+    }
+    if (!state.ws || state.ws.readyState === WebSocket.CLOSED || state.ws.readyState === WebSocket.CLOSING) {
+      connectWS();
+    }
+    const ws = state.ws;
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      ws.removeEventListener('open', onOpen);
+      console.error(`WS connect timed out after ${timeoutMs}ms — dropping message`, msg);
+      showToast('Connection is slow — please try again.');
+      setButtonsEnabled(true);
+    }, timeoutMs);
+    function onOpen() {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      wsSend(msg);
+    }
+    ws.addEventListener('open', onOpen, { once: true });
   }
 
   function handleWSMessage(msg) {
@@ -824,6 +858,7 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
         alert(msg.matchOver ? 'Wall exhausted — draw. Match complete.' : 'Wall exhausted — hand is a draw.');
         break;
       case 'error':
+        console.error('Server rejected action:', msg.message);
         alert(msg.message);
         setButtonsEnabled(true);
         goToDashboardFallback();
@@ -832,8 +867,16 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
   }
 
   function goToDashboardFallback() {
-    // safety net: never leave the user stuck with disabled buttons
+    // Safety net: never leave the user stuck with disabled buttons. This matters most
+    // for a REJECTED action (e.g. clicking Pung/Kong/Chow/Declare Mahjong on an invalid
+    // move) — the server throws before mutating room state, so no fresh room_state
+    // broadcast follows to re-run renderActionBar() and reset its double-fire guard.
+    // Without clearing the guard flag here too, every action button in the bar would
+    // look enabled but silently no-op on every future click (guardedSend bails out
+    // early) until the player fully leaves and rejoins, forcing a new room_state.
     setButtonsEnabled(true);
+    const bar = document.getElementById('actionBar');
+    if (bar) delete bar.dataset.actionTaken;
   }
 
   // ---------- Dashboard actions ----------
@@ -841,8 +884,7 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
   document.getElementById('joinRoomBtn').addEventListener('click', () => {
     const code = document.getElementById('joinRoomCode').value.trim().toUpperCase();
     if (!code) return;
-    if (!state.ws) connectWS();
-    setTimeout(() => wsSend({ type: 'join_room', roomCode: code, playerId: state.playerId, userId: state.user.id, displayName: state.user.name }), 150);
+    sendWhenConnected({ type: 'join_room', roomCode: code, playerId: state.playerId, userId: state.user.id, displayName: state.user.name });
   });
 
   document.getElementById('leaveWaitingBtn').addEventListener('click', () => {
@@ -1835,16 +1877,13 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
 
   // createRoomBtn — include AI config
   document.getElementById('createRoomBtn').addEventListener('click', function() {
-    if (!state.ws) connectWS();
-    setTimeout(function() {
-      wsSend({
-        type: 'create_room',
-        playerId: state.playerId,
-        userId: state.user && state.user.id,
-        displayName: state.user && state.user.name,
-        aiPlayers: state.pendingAiSlots,
-      });
-    }, 150);
+    sendWhenConnected({
+      type: 'create_room',
+      playerId: state.playerId,
+      userId: state.user && state.user.id,
+      displayName: state.user && state.user.name,
+      aiPlayers: state.pendingAiSlots,
+    });
   });
 
   // Room code tap-to-copy
