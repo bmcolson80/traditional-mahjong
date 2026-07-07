@@ -113,3 +113,40 @@ export function run(sql, params = []) {
   db.run(sql, params);
   persist();
 }
+
+// Deletes finished/ended games (and their game_players rows) older than the
+// retention window. `finished` means a hand ended, not that the room is
+// abandoned — a room can cycle back to `playing` for the next hand — so
+// callers should pass `excludeRoomCodes` for any room currently held in
+// memory to avoid deleting one that's just between hands.
+export function cleanupOldGames({ retentionDays = 30, excludeRoomCodes = [] } = {}) {
+  const candidates = all(
+    `SELECT id, room_code FROM games
+     WHERE phase IN ('finished', 'ended')
+       AND COALESCE(ended_at, created_at) < datetime('now', ?)`,
+    [`-${retentionDays} days`]
+  );
+
+  const exclude = new Set(excludeRoomCodes);
+  const toDelete = candidates.filter(g => !exclude.has(g.room_code));
+  if (toDelete.length === 0) return { deletedGames: 0, deletedPlayers: 0 };
+
+  const ids = toDelete.map(g => g.id);
+  const placeholders = ids.map(() => '?').join(',');
+
+  const playerCountRow = get(
+    `SELECT COUNT(*) as c FROM game_players WHERE game_id IN (${placeholders})`,
+    ids
+  );
+  const deletedPlayers = playerCountRow?.c ?? 0;
+
+  run(`DELETE FROM game_players WHERE game_id IN (${placeholders})`, ids);
+  run(`DELETE FROM games WHERE id IN (${placeholders})`, ids);
+
+  console.log(
+    `[db cleanup] Deleted ${ids.length} game(s) older than ${retentionDays}d ` +
+    `(room codes: ${toDelete.map(g => g.room_code).join(', ')}) and ${deletedPlayers} game_players row(s)`
+  );
+
+  return { deletedGames: ids.length, deletedPlayers };
+}

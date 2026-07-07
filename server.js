@@ -10,7 +10,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
 
-import { initDB, all, get, run, getDB, persist } from './db.js';
+import { initDB, all, get, run, getDB, persist, cleanupOldGames } from './db.js';
 import * as G from './game.js';
 import * as AI from './ai.js';
 
@@ -384,9 +384,13 @@ function persistRoom(room) {
     // of "Create Game" hanging or taking a long time to respond.
     const database = getDB();
     database.run(
-      `INSERT INTO games (room_code, phase, state_json) VALUES (?, ?, ?)
-       ON CONFLICT(room_code) DO UPDATE SET phase = excluded.phase, state_json = excluded.state_json`,
-      [room.code, room.phase, serializeRoom(room)]
+      `INSERT INTO games (room_code, phase, state_json, ended_at)
+       VALUES (?, ?, ?, CASE WHEN ? = 'ended' THEN datetime('now') ELSE NULL END)
+       ON CONFLICT(room_code) DO UPDATE SET
+         phase = excluded.phase,
+         state_json = excluded.state_json,
+         ended_at = CASE WHEN excluded.phase = 'ended' THEN COALESCE(games.ended_at, datetime('now')) ELSE games.ended_at END`,
+      [room.code, room.phase, serializeRoom(room), room.phase]
     );
     // Refresh game_players so /api/my-games can find this user's active games
     const gameRow = get('SELECT id FROM games WHERE room_code = ?', [room.code]);
@@ -1025,10 +1029,22 @@ process.on('unhandledRejection', (reason) => {
 // ---------- Startup ----------
 
 const PORT = process.env.PORT ?? 3000;
+const GAME_RETENTION_DAYS = Number(process.env.GAME_RETENTION_DAYS ?? 30);
+const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000; // once a day
+
+function runGameCleanup() {
+  try {
+    cleanupOldGames({ retentionDays: GAME_RETENTION_DAYS, excludeRoomCodes: [...rooms.keys()] });
+  } catch (err) {
+    console.error('Game cleanup failed:', err);
+  }
+}
 
 export async function startServer() {
   await initDB();
   await loadRoomsFromDB();
+  runGameCleanup();
+  setInterval(runGameCleanup, CLEANUP_INTERVAL_MS).unref();
   return new Promise((resolve) => {
     server.listen(PORT, () => {
       console.log(`Mahjong server listening on port ${PORT}`);

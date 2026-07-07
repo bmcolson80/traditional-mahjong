@@ -258,6 +258,75 @@ describe('bankruptcy ends the match instantly', () => {
   });
 });
 
+// ── cleanupOldGames ──────────────────────────────────────────────────────────
+
+describe('cleanupOldGames', () => {
+  test('deletes finished/ended games older than the retention window, and their game_players rows', async () => {
+    const { run, get, cleanupOldGames } = await import('../db.js');
+    const { ws, roomCode } = await createRoomWithAI('cleanup-old-p0', 7, 'OldHost');
+    ws.close();
+
+    // Simulate a long-abandoned game: ended, and created/ended far in the past.
+    run(
+      `UPDATE games SET phase='ended', created_at=datetime('now','-60 days'), ended_at=datetime('now','-60 days')
+       WHERE room_code=?`,
+      [roomCode]
+    );
+    const before = get('SELECT id FROM games WHERE room_code=?', [roomCode]);
+    assert.ok(before, 'Game row exists before cleanup');
+    assert.ok(
+      get('SELECT COUNT(*) as c FROM game_players WHERE game_id=?', [before.id]).c > 0,
+      'game_players rows exist before cleanup'
+    );
+
+    const result = cleanupOldGames({ retentionDays: 30 });
+    assert.ok(result.deletedGames >= 1, 'Should delete at least the old game');
+
+    assert.equal(get('SELECT id FROM games WHERE room_code=?', [roomCode]), null, 'Game row deleted');
+    assert.equal(
+      get('SELECT COUNT(*) as c FROM game_players WHERE game_id=?', [before.id]).c,
+      0,
+      'game_players rows deleted'
+    );
+  });
+
+  test('does not delete recent finished/ended games', async () => {
+    const { run, get, cleanupOldGames } = await import('../db.js');
+    const { ws, roomCode } = await createRoomWithAI('cleanup-recent-p0', 8, 'RecentHost');
+    ws.close();
+
+    run(`UPDATE games SET phase='ended' WHERE room_code=?`, [roomCode]);
+    cleanupOldGames({ retentionDays: 30 });
+
+    assert.ok(get('SELECT id FROM games WHERE room_code=?', [roomCode]), 'Recent game row must survive cleanup');
+  });
+
+  test('does not delete a game excluded via excludeRoomCodes, even if old', async () => {
+    const { run, get, cleanupOldGames } = await import('../db.js');
+    const { ws, roomCode } = await createRoomWithAI('cleanup-excl-p0', 9, 'ExclHost');
+    ws.close();
+
+    run(
+      `UPDATE games SET phase='finished', created_at=datetime('now','-60 days') WHERE room_code=?`,
+      [roomCode]
+    );
+    cleanupOldGames({ retentionDays: 30, excludeRoomCodes: [roomCode] });
+
+    assert.ok(get('SELECT id FROM games WHERE room_code=?', [roomCode]), 'Excluded room must survive cleanup');
+  });
+
+  test('does not delete active waiting/playing games regardless of age', async () => {
+    const { run, get, cleanupOldGames } = await import('../db.js');
+    const { ws, roomCode } = await createRoomWithAI('cleanup-active-p0', 10, 'ActiveHost');
+
+    run(`UPDATE games SET created_at=datetime('now','-60 days') WHERE room_code=?`, [roomCode]);
+    cleanupOldGames({ retentionDays: 30 });
+
+    assert.ok(get('SELECT id FROM games WHERE room_code=?', [roomCode]), 'Active game row must survive cleanup');
+    ws.close();
+  });
+});
+
 // ── /api/my-games ─────────────────────────────────────────────────────────────
 
 describe('/api/my-games', () => {
