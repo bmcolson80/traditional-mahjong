@@ -72,9 +72,18 @@ export async function initDB() {
 }
 
 export function persist() {
+  const startedAt = Date.now();
   try {
     const data = db.export();
     fs.writeFileSync(DB_PATH, Buffer.from(data));
+    const durationMs = Date.now() - startedAt;
+    // sql.js re-serializes and rewrites the ENTIRE database on every persist() call,
+    // which blocks the single-threaded event loop for everyone. This grows with DB
+    // size (e.g. accumulated finished games), so a creeping duration here — not a
+    // one-off spike — is the signal that unbounded row growth needs addressing.
+    if (durationMs > 200) {
+      console.warn(`DB persist took ${durationMs}ms (db size ~${(data.length / 1024).toFixed(0)}KB) — event loop was blocked for this long`);
+    }
   } catch (err) {
     console.error('DB persist failed:', err);
   }
