@@ -31,6 +31,8 @@ if (pushConfigured) {
   webpush.setVapidDetails(`mailto:${VAPID_EMAIL}`, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 }
 
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'bmcolson80@gmail.com').toLowerCase();
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -62,6 +64,13 @@ function requireAuth(req, res, next) {
   }
 }
 
+function requireAdmin(req, res, next) {
+  if (req.user?.email?.toLowerCase() !== ADMIN_EMAIL) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  next();
+}
+
 // ---------- Auth routes ----------
 
 app.post('/api/register', async (req, res) => {
@@ -79,7 +88,7 @@ app.post('/api/register', async (req, res) => {
 
     const token = signToken(user);
     setAuthCookie(res, token);
-    res.json({ id: user.id, email: user.email, name: user.name });
+    res.json({ id: user.id, email: user.email, name: user.name, isAdmin: user.email.toLowerCase() === ADMIN_EMAIL });
   } catch (err) {
     console.error('Register error:', err);
     res.status(500).json({ error: 'Registration failed' });
@@ -98,7 +107,7 @@ app.post('/api/login', async (req, res) => {
 
     const token = signToken(user);
     setAuthCookie(res, token);
-    res.json({ id: user.id, email: user.email, name: user.name });
+    res.json({ id: user.id, email: user.email, name: user.name, isAdmin: user.email.toLowerCase() === ADMIN_EMAIL });
   } catch (err) {
     console.error('Login error:', err);
     res.status(500).json({ error: 'Login failed' });
@@ -111,7 +120,7 @@ app.post('/api/logout', (req, res) => {
 });
 
 app.get('/api/me', requireAuth, (req, res) => {
-  res.json(req.user);
+  res.json({ ...req.user, isAdmin: req.user.email.toLowerCase() === ADMIN_EMAIL });
 });
 
 // Password reset: request OTP
@@ -260,6 +269,39 @@ app.get('/api/my-games', requireAuth, (req, res) => {
   } catch (err) {
     console.error('my-games error:', err);
     res.status(500).json({ error: 'Failed to load games' });
+  }
+});
+
+// ── Admin ────────────────────────────────────────────────────
+// The HTML shell itself has no sensitive data — access control happens
+// at the /api/admin/* endpoints below, which the page calls client-side.
+app.get('/admin', (_, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
+
+// Aggregate usage stats for the admin. Gated by ADMIN_EMAIL — see requireAdmin.
+app.get('/api/admin/stats', requireAuth, requireAdmin, (req, res) => {
+  try {
+    const totalUsers = get('SELECT COUNT(*) as c FROM users').c;
+    const newUsersLast7d = get(`SELECT COUNT(*) as c FROM users WHERE created_at >= datetime('now', '-7 days')`).c;
+    const totalGames = get('SELECT COUNT(*) as c FROM games').c;
+    const activeGames = get(`SELECT COUNT(*) as c FROM games WHERE phase IN ('waiting', 'playing')`).c;
+    const gamesLast7d = get(`SELECT COUNT(*) as c FROM games WHERE created_at >= datetime('now', '-7 days')`).c;
+    const avgRow = get(
+      `SELECT AVG((julianday(ended_at) - julianday(created_at)) * 24 * 60) as avgMinutes
+       FROM games WHERE phase = 'ended' AND ended_at IS NOT NULL`
+    );
+    res.json({
+      totalUsers,
+      newUsersLast7d,
+      totalGames,
+      activeGames,
+      gamesLast7d,
+      avgGameDurationMinutes: avgRow.avgMinutes != null ? Math.round(avgRow.avgMinutes * 10) / 10 : null,
+    });
+  } catch (err) {
+    console.error('admin stats error:', err);
+    res.status(500).json({ error: 'Failed to load stats' });
   }
 });
 

@@ -12,6 +12,7 @@ process.env.NODE_ENV   = 'test';
 process.env.DB_PATH    = './test/persistence-test.db';
 process.env.PORT       = '3903';
 process.env.JWT_SECRET = 'persist-secret';
+process.env.ADMIN_EMAIL = 'admin@test.com';
 
 const { startServer, server, rooms, loadRoomsFromDB } = await import('../server.js');
 
@@ -65,6 +66,19 @@ function nodeRequest(method, path, body = null, cookieHeader = '') {
     });
     req.on('error', reject);
     if (bodyStr) req.write(bodyStr);
+    req.end();
+  });
+}
+
+// Like nodeRequest, but for endpoints that don't return JSON (e.g. the admin HTML shell).
+function nodeRequestRaw(method, path) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ hostname: 'localhost', port: Number(process.env.PORT), path, method }, res => {
+      let data = '';
+      res.on('data', c => { data += c; });
+      res.on('end', () => resolve({ status: res.statusCode, body: data }));
+    });
+    req.on('error', reject);
     req.end();
   });
 }
@@ -324,6 +338,69 @@ describe('cleanupOldGames', () => {
 
     assert.ok(get('SELECT id FROM games WHERE room_code=?', [roomCode]), 'Active game row must survive cleanup');
     ws.close();
+  });
+});
+
+// ── /api/admin/stats ─────────────────────────────────────────────────────────
+
+describe('/api/admin/stats', () => {
+  test('returns 401 for unauthenticated requests', async () => {
+    const { status } = await nodeRequest('GET', '/api/admin/stats');
+    assert.equal(status, 401);
+  });
+
+  test('returns 403 for an authenticated non-admin user', async () => {
+    const { cookie } = await registerAndGetCookie('notadmin@test.com', 'NotAdmin');
+    const { status } = await nodeRequest('GET', '/api/admin/stats', null, cookie);
+    assert.equal(status, 403);
+  });
+
+  test('returns aggregate stats for the admin user', async () => {
+    const { cookie } = await registerAndGetCookie('admin@test.com', 'Admin');
+    const { ws } = await createRoomWithAI('admin-stats-p0', 99, 'StatsHost');
+    ws.close();
+
+    const { status, body } = await nodeRequest('GET', '/api/admin/stats', null, cookie);
+    assert.equal(status, 200);
+    assert.ok(body.totalUsers >= 1);
+    assert.ok(body.totalGames >= 1);
+    assert.ok(body.activeGames >= 1, 'the just-created game should count as active');
+    assert.ok(body.gamesLast7d >= 1);
+    assert.ok(body.newUsersLast7d >= 1);
+    assert.ok('avgGameDurationMinutes' in body);
+  });
+});
+
+// ── /admin page + isAdmin flag ───────────────────────────────────────────────
+
+describe('/admin page', () => {
+  test('serves the admin HTML shell to anyone (gating happens client-side via the API)', async () => {
+    const { status, body } = await nodeRequestRaw('GET', '/admin');
+    assert.equal(status, 200);
+    assert.match(body, /admin/i);
+  });
+});
+
+describe('isAdmin flag', () => {
+  test('/api/register reports isAdmin: false for a non-admin email', async () => {
+    const { body: registerBody } = await nodeRequest('POST', '/api/register', {
+      email: 'notadmin2@test.com', name: 'NotAdmin2', password: 'test1234',
+    });
+    assert.equal(registerBody.isAdmin, false);
+  });
+
+  test('/api/me reports isAdmin: true only for the configured ADMIN_EMAIL', async () => {
+    // admin@test.com was already registered by the /api/admin/stats suite above.
+    const { body: loginBody, cookie: adminCookie } = await nodeRequest('POST', '/api/login', {
+      email: 'admin@test.com', password: 'test1234',
+    });
+    assert.equal(loginBody.isAdmin, true);
+    const adminMe = await nodeRequest('GET', '/api/me', null, adminCookie);
+    assert.equal(adminMe.body.isAdmin, true);
+
+    const { cookie: regularCookie } = await registerAndGetCookie('regular@test.com', 'Regular');
+    const regularMe = await nodeRequest('GET', '/api/me', null, regularCookie);
+    assert.equal(regularMe.body.isAdmin, false);
   });
 });
 

@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Mahjong — Admin</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Lato:wght@300;400;700&display=swap');
+:root{--navy:#0d2b1e;--navy-light:#163d2b;--navy-mid:#1e5038;--gold:#c9a227;--gold-light:#e8c547;--cream:#f5ecd7;--cream-dark:#e8d8b8;--shadow:rgba(0,0,0,0.4);--radius:12px;--radius-sm:6px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--navy);color:var(--cream);font-family:'Lato',sans-serif;min-height:100vh;padding:24px}
+.wrap{max-width:1100px;margin:0 auto}
+.header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px}
+.title{font-family:'Cinzel',serif;font-size:clamp(20px,4vw,28px);font-weight:700;letter-spacing:3px;color:var(--gold)}
+.title-sub{font-size:11px;letter-spacing:2px;color:rgba(245,236,215,.5);margin-top:2px}
+.actions{display:flex;gap:10px}
+.btn{background:var(--navy-mid);color:var(--cream);border:1px solid rgba(201,162,39,.3);padding:8px 16px;border-radius:var(--radius-sm);font-size:13px;cursor:pointer;font-family:'Lato',sans-serif}
+.btn:hover{background:var(--navy-light)}
+.btn-back{text-decoration:none;display:inline-flex;align-items:center}
+
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px}
+.card{background:var(--navy-light);border:1px solid rgba(201,162,39,.2);border-radius:var(--radius);padding:18px;box-shadow:0 4px 16px var(--shadow)}
+.card-value{font-family:'Cinzel',serif;font-size:30px;font-weight:700;color:var(--gold-light)}
+.card-label{font-size:11px;letter-spacing:1.5px;color:rgba(245,236,215,.55);text-transform:uppercase;margin-top:6px}
+.empty,.denied{padding:60px 20px;text-align:center;color:rgba(245,236,215,.5)}
+.denied a{color:var(--gold)}
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <div class="empty">Loading…</div>
+</div>
+
+<script>
+async function main() {
+  const app = document.getElementById('app');
+
+  const meRes = await fetch('/api/me').catch(() => null);
+  if (!meRes || !meRes.ok) {
+    app.innerHTML = denied('You must be signed in to view this page.');
+    return;
+  }
+  const me = await meRes.json();
+  if (!me.isAdmin) {
+    app.innerHTML = denied('This page is only available to the admin account.');
+    return;
+  }
+
+  const statsRes = await fetch('/api/admin/stats');
+  if (!statsRes.ok) {
+    app.innerHTML = denied('Failed to load admin data.');
+    return;
+  }
+  const stats = await statsRes.json();
+  render(stats);
+}
+
+function denied(msg) {
+  return `<div class="denied"><p>${msg}</p><p style="margin-top:12px"><a href="/">← Back to Mahjong</a></p></div>`;
+}
+
+function render(s) {
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <div class="header">
+      <div>
+        <div class="title">MAHJONG — ADMIN</div>
+        <div class="title-sub">ANALYTICS DASHBOARD</div>
+      </div>
+      <div class="actions">
+        <button class="btn" onclick="location.reload()">↻ Refresh</button>
+        <a class="btn btn-back" href="/">← Back to game</a>
+      </div>
+    </div>
+
+    <div class="cards">
+      ${card(s.totalUsers, 'Registered Users')}
+      ${card(s.newUsersLast7d, 'New Users (7d)')}
+      ${card(s.totalGames, 'Total Games')}
+      ${card(s.activeGames, 'Games In Progress')}
+      ${card(s.gamesLast7d, 'Games Started (7d)')}
+      ${card(s.avgGameDurationMinutes != null ? s.avgGameDurationMinutes + 'm' : '–', 'Avg Game Duration')}
+    </div>
+  `;
+}
+
+function card(value, label) {
+  return `<div class="card"><div class="card-value">${value}</div><div class="card-label">${label}</div></div>`;
+}
+
+main();
+</script>
+</body>
+</html>
