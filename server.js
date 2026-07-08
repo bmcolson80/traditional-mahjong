@@ -123,6 +123,36 @@ app.get('/api/me', requireAuth, (req, res) => {
   res.json({ ...req.user, isAdmin: req.user.email.toLowerCase() === ADMIN_EMAIL });
 });
 
+// ── SSO handoff from GamesNight hub ─────────────────────────
+// The hub redirects here with its own JWT (id/email/name, signed with the
+// shared JWT_SECRET). users.id here is an AUTOINCREMENT integer, so unlike
+// a TEXT-keyed app we can't adopt the hub's id verbatim — instead we look
+// the account up (or create it) by email and mint our own local session,
+// exactly as if they'd logged in directly.
+app.get('/sso', async (req, res) => {
+  const { token, createRoom, joinRoom } = req.query;
+  if (token) {
+    try {
+      const payload = jwt.verify(token, JWT_SECRET);
+      const email = payload.email.toLowerCase();
+      let user = get('SELECT * FROM users WHERE email = ?', [email]);
+      if (!user) {
+        const hash = bcrypt.hashSync(randomUUID(), 10);
+        run('INSERT INTO users (email, name, password_hash) VALUES (?, ?, ?)', [email, payload.name, hash]);
+        user = get('SELECT * FROM users WHERE email = ?', [email]);
+      }
+      setAuthCookie(res, signToken(user));
+    } catch {
+      // invalid/expired token — fall through unauthenticated
+    }
+  }
+  const params = new URLSearchParams();
+  if (createRoom) params.set('createRoom', createRoom);
+  if (joinRoom)   params.set('joinRoom', joinRoom);
+  const qs = params.toString();
+  res.redirect('/' + (qs ? '?' + qs : ''));
+});
+
 // Password reset: request OTP
 app.post('/api/password-reset/request', async (req, res) => {
   try {
@@ -302,6 +332,77 @@ app.get('/api/admin/stats', requireAuth, requireAdmin, (req, res) => {
   } catch (err) {
     console.error('admin stats error:', err);
     res.status(500).json({ error: 'Failed to load stats' });
+  }
+});
+
+// Per-user breakdown for the admin: games played, wins, losses, push status,
+// and which other registered users they've played with. Computed in one pass
+// over every started game's persisted state rather than a query per user —
+// cheap at game-night scale, and avoids relying on sql.js's JSON1 support.
+//
+// "Started" excludes lobbies that never left the waiting-room phase.
+// Win/loss is only tallied for games that actually concluded — phase 'ended'
+// (host force-ended), or 'finished' with a full East→North cycle
+// (round.matchOver) — since 'finished' alone just means one hand ended and
+// the match may still continue. Score comparison uses ALL seated players
+// (AI included) so a human isn't wrongly credited with a win an AI actually
+// took; only registered humans get stats attributed to them.
+app.get('/api/admin/users', requireAuth, requireAdmin, (req, res) => {
+  try {
+    const users = all('SELECT id, email, name FROM users ORDER BY created_at ASC');
+    const nameById = new Map(users.map(u => [u.id, u.name]));
+    const pushUserIds = new Set(all('SELECT DISTINCT user_id FROM push_subscriptions').map(r => r.user_id));
+    const startedGames = all(`SELECT id, phase, state_json FROM games WHERE phase IN ('playing','finished','ended')`);
+
+    const statsByUser = new Map();
+    const statsFor = (userId) => {
+      if (!statsByUser.has(userId)) statsByUser.set(userId, { games: new Set(), wins: 0, losses: 0, coPlayers: new Set() });
+      return statsByUser.get(userId);
+    };
+
+    for (const g of startedGames) {
+      let state;
+      try { state = JSON.parse(g.state_json); } catch { continue; }
+      const allPlayers = state?.players ?? [];
+      const humans = allPlayers.filter(p => !p.isAI && p.userId != null);
+      if (humans.length === 0) continue;
+
+      for (const p of humans) statsFor(p.userId).games.add(g.id);
+      for (const p of humans) {
+        const s = statsFor(p.userId);
+        for (const other of humans) if (other.userId !== p.userId) s.coPlayers.add(other.userId);
+      }
+
+      const isComplete = g.phase === 'ended' || (g.phase === 'finished' && state?.round?.matchOver === true);
+      if (!isComplete || allPlayers.length === 0) continue;
+      const maxScore = Math.max(...allPlayers.map(p => p.score ?? 0));
+      const topScorers = allPlayers.filter(p => (p.score ?? 0) === maxScore);
+      const winner = topScorers.length === 1 ? topScorers[0] : null;
+      for (const p of humans) {
+        const s = statsFor(p.userId);
+        if (winner && !winner.isAI && winner.userId === p.userId) s.wins++;
+        else s.losses++;
+      }
+    }
+
+    const result = users.map(u => {
+      const s = statsByUser.get(u.id);
+      return {
+        id: u.id,
+        email: u.email,
+        name: u.name,
+        gamesPlayed: s ? s.games.size : 0,
+        wins: s ? s.wins : 0,
+        losses: s ? s.losses : 0,
+        pushEnabled: pushUserIds.has(u.id),
+        coPlayers: s ? [...s.coPlayers].map(id => nameById.get(id)).filter(Boolean).sort() : [],
+      };
+    });
+
+    res.json({ users: result });
+  } catch (err) {
+    console.error('admin users error:', err);
+    res.status(500).json({ error: 'Failed to load users' });
   }
 });
 
@@ -700,7 +801,15 @@ function handleMessage(ws, msg) {
       break;
     }
     case 'create_room': {
-      const roomCode = genRoomCode();
+      // An explicit code is used when a GamesNight hub invite hands both
+      // players the same room code to rendezvous on.
+      let roomCode;
+      if (msg.roomCode) {
+        roomCode = msg.roomCode.toUpperCase();
+        if (rooms.has(roomCode)) return send(ws, { type: 'error', message: 'Room already exists.' });
+      } else {
+        roomCode = genRoomCode();
+      }
       const playerId = msg.playerId ?? randomUUID();
       const room = G.createRoom(roomCode, playerId, msg.userId ?? null);
       G.addPlayer(room, { playerId, userId: msg.userId, displayName: msg.displayName ?? 'Player' });
