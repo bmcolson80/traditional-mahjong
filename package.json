@@ -6,6 +6,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "dev": "node --watch server.js",
+    "dev:local": "PORT=3001 JWT_SECRET=azul-secret-change-in-production node --watch server.js",
     "test": "node --test test/game.test.js",
     "test:all": "node --test test/game.test.js test/e2e.test.js test/regression.test.js test/ai.test.js test/persistence.test.js test/special-hands.test.js"
   },
