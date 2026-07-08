@@ -24,6 +24,21 @@ body{background:var(--navy);color:var(--cream);font-family:'Lato',sans-serif;min
 .card-label{font-size:11px;letter-spacing:1.5px;color:rgba(245,236,215,.55);text-transform:uppercase;margin-top:6px}
 .empty,.denied{padding:60px 20px;text-align:center;color:rgba(245,236,215,.5)}
 .denied a{color:var(--gold)}
+
+.frame{background:var(--navy-light);border:1px solid rgba(201,162,39,.2);border-radius:var(--radius);box-shadow:0 4px 16px var(--shadow);margin-top:24px;overflow:hidden}
+.frame-title{font-family:'Cinzel',serif;font-size:15px;letter-spacing:2px;color:var(--gold);padding:16px 18px;border-bottom:1px solid rgba(201,162,39,.2)}
+.users-table{width:100%;border-collapse:collapse;font-size:13px}
+.users-table th{text-align:left;padding:10px 14px;color:rgba(245,236,215,.55);font-size:10px;letter-spacing:1px;text-transform:uppercase;border-bottom:1px solid rgba(201,162,39,.15);white-space:nowrap}
+.users-table td{padding:10px 14px;border-bottom:1px solid rgba(201,162,39,.08);vertical-align:top}
+.users-table tr:last-child td{border-bottom:none}
+.users-table tr:hover td{background:rgba(201,162,39,.05)}
+.user-name{color:var(--cream);font-weight:700}
+.user-email{color:rgba(245,236,215,.5);font-size:11px;margin-top:2px}
+.pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;letter-spacing:.5px;text-transform:uppercase}
+.pill-on{background:rgba(201,162,39,.25);color:var(--gold-light)}
+.pill-off{background:rgba(245,236,215,.08);color:rgba(245,236,215,.4)}
+.co-players{color:rgba(245,236,215,.6);font-size:12px;max-width:260px}
+.frame-empty{padding:30px 18px;text-align:center;color:rgba(245,236,215,.4);font-size:13px}
 </style>
 </head>
 <body>
@@ -46,20 +61,24 @@ async function main() {
     return;
   }
 
-  const statsRes = await fetch('/api/admin/stats');
+  const [statsRes, usersRes] = await Promise.all([
+    fetch('/api/admin/stats'),
+    fetch('/api/admin/users'),
+  ]);
   if (!statsRes.ok) {
     app.innerHTML = denied('Failed to load admin data.');
     return;
   }
   const stats = await statsRes.json();
-  render(stats);
+  const users = usersRes.ok ? (await usersRes.json()).users : null;
+  render(stats, users);
 }
 
 function denied(msg) {
   return `<div class="denied"><p>${msg}</p><p style="margin-top:12px"><a href="/">← Back to Mahjong</a></p></div>`;
 }
 
-function render(s) {
+function render(s, users) {
   const app = document.getElementById('app');
   app.innerHTML = `
     <div class="header">
@@ -81,11 +100,46 @@ function render(s) {
       ${card(s.gamesLast7d, 'Games Started (7d)')}
       ${card(s.avgGameDurationMinutes != null ? s.avgGameDurationMinutes + 'm' : '–', 'Avg Game Duration')}
     </div>
+
+    <div class="frame">
+      <div class="frame-title">REGISTERED USERS</div>
+      ${users ? usersTable(users) : `<div class="frame-empty">Failed to load users.</div>`}
+    </div>
   `;
 }
 
 function card(value, label) {
   return `<div class="card"><div class="card-value">${value}</div><div class="card-label">${label}</div></div>`;
+}
+
+function usersTable(users) {
+  if (users.length === 0) return `<div class="frame-empty">No registered users yet.</div>`;
+  const rows = users.map(u => `
+    <tr>
+      <td>
+        <div class="user-name">${escapeHtml(u.name)}</div>
+        <div class="user-email">${escapeHtml(u.email)}</div>
+      </td>
+      <td>${u.gamesPlayed}</td>
+      <td>${u.wins}–${u.losses}</td>
+      <td><span class="pill ${u.pushEnabled ? 'pill-on' : 'pill-off'}">${u.pushEnabled ? 'On' : 'Off'}</span></td>
+      <td class="co-players">${u.coPlayers.length ? escapeHtml(u.coPlayers.join(', ')) : '–'}</td>
+    </tr>
+  `).join('');
+  return `
+    <table class="users-table">
+      <thead>
+        <tr><th>Player</th><th>Games</th><th>W–L</th><th>Push</th><th>Co-Players</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str ?? '';
+  return div.innerHTML;
 }
 
 main();

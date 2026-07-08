@@ -14,7 +14,7 @@ process.env.PORT       = '3903';
 process.env.JWT_SECRET = 'persist-secret';
 process.env.ADMIN_EMAIL = 'admin@test.com';
 
-const { startServer, server, rooms, loadRoomsFromDB } = await import('../server.js');
+const { startServer, server, rooms, loadRoomsFromDB, persistRoom } = await import('../server.js');
 
 before(async () => { await startServer(); });
 
@@ -86,6 +86,14 @@ function nodeRequestRaw(method, path) {
 async function registerAndGetCookie(email, name = 'Tester') {
   const { body: user, cookie } = await nodeRequest('POST', '/api/register', { email, name, password: 'test1234' });
   return { user, cookie };
+}
+
+// admin@test.com is registered once by the '/api/admin/stats' suite above (see that
+// describe block); every suite after it that needs to call an admin-gated endpoint
+// logs back in for a fresh cookie rather than re-registering (which would 409).
+async function adminCookie() {
+  const { cookie } = await nodeRequest('POST', '/api/login', { email: 'admin@test.com', password: 'test1234' });
+  return cookie;
 }
 
 // Create a room + AI players. Registers both listeners BEFORE sending to avoid race conditions.
@@ -368,6 +376,142 @@ describe('/api/admin/stats', () => {
     assert.ok(body.gamesLast7d >= 1);
     assert.ok(body.newUsersLast7d >= 1);
     assert.ok('avgGameDurationMinutes' in body);
+  });
+});
+
+// ── /api/admin/users ─────────────────────────────────────────────────────────
+
+describe('/api/admin/users', () => {
+  test('returns 401 for unauthenticated requests', async () => {
+    const { status } = await nodeRequest('GET', '/api/admin/users');
+    assert.equal(status, 401);
+  });
+
+  test('returns 403 for an authenticated non-admin user', async () => {
+    const { cookie } = await registerAndGetCookie('notadmin-users@test.com', 'NotAdminUsers');
+    const { status } = await nodeRequest('GET', '/api/admin/users', null, cookie);
+    assert.equal(status, 403);
+  });
+
+  test('a lobby that never started does not count as a game played', async () => {
+    const { user } = await registerAndGetCookie('lobby-only@test.com', 'LobbyOnly');
+    // create_room with zero AI leaves the room at phase 'waiting' — never actually started.
+    const ws = await connect();
+    const createdP = waitMsg(ws, m => m.type === 'room_created');
+    ws.send(JSON.stringify({ type: 'create_room', playerId: 'lobby-only-p0', userId: user.id, displayName: 'LobbyOnly', aiPlayers: [] }));
+    await createdP;
+
+    const { body } = await nodeRequest('GET', '/api/admin/users', null, await adminCookie());
+    const me = body.users.find(u => u.id === user.id);
+    assert.equal(me.gamesPlayed, 0, 'a never-started lobby must not count as played');
+    ws.close();
+  });
+
+  test('a completed game updates gamesPlayed and wins/losses for the human player, based on final score vs. AI', async () => {
+    const { user } = await registerAndGetCookie('winner@test.com', 'Winner');
+    const { ws, roomCode } = await createRoomWithAI('winner-p0', user.id, 'Winner');
+    const room = rooms.get(roomCode);
+    const host = room.players.find(p => p.userId === user.id);
+    // Give the human the strictly highest score, then force the match to a genuine end
+    // (matchOver) the same way the bankruptcy test above does — 'finished' alone (just a
+    // hand ending) must NOT be enough, since the match could still continue past it.
+    host.score = 999999;
+    room.round.matchOver = true;
+    room.phase = 'finished';
+    persistRoom(room);
+
+    const { status, body } = await nodeRequest('GET', '/api/admin/users', null, await adminCookie());
+    assert.equal(status, 200);
+    const me = body.users.find(u => u.id === user.id);
+    assert.ok(me, 'the user should appear in the admin users list');
+    assert.equal(me.gamesPlayed, 1);
+    assert.equal(me.wins, 1);
+    assert.equal(me.losses, 0);
+    ws.close();
+  });
+
+  test('a "finished" hand that has not reached matchOver does not yet count as a win or loss', async () => {
+    const { user } = await registerAndGetCookie('midmatch@test.com', 'MidMatch');
+    const { ws, roomCode } = await createRoomWithAI('midmatch-p0', user.id, 'MidMatch');
+    const room = rooms.get(roomCode);
+    room.phase = 'finished'; // one hand ended, but round.matchOver is still false
+    persistRoom(room);
+
+    const { body } = await nodeRequest('GET', '/api/admin/users', null, await adminCookie());
+    const me = body.users.find(u => u.id === user.id);
+    assert.equal(me.gamesPlayed, 1, 'the game still counts as played once started');
+    assert.equal(me.wins, 0);
+    assert.equal(me.losses, 0, 'no win/loss should be tallied until the match actually concludes');
+    ws.close();
+  });
+
+  test('an AI winning the match counts as a loss for every human, not a win for anyone', async () => {
+    const { user } = await registerAndGetCookie('losetoai@test.com', 'LosesToAI');
+    const { ws, roomCode } = await createRoomWithAI('losetoai-p0', user.id, 'LosesToAI');
+    const room = rooms.get(roomCode);
+    const host = room.players.find(p => p.userId === user.id);
+    const ai = room.players.find(p => p.isAI);
+    host.score = 100;
+    ai.score = 999999; // the AI has the true highest score
+    room.round.matchOver = true;
+    room.phase = 'ended';
+    persistRoom(room);
+
+    const { body } = await nodeRequest('GET', '/api/admin/users', null, await adminCookie());
+    const me = body.users.find(u => u.id === user.id);
+    assert.equal(me.wins, 0);
+    assert.equal(me.losses, 1);
+    ws.close();
+  });
+
+  test('two human players in the same completed game are recorded as co-players of each other, AI excluded', async () => {
+    const { user: userA } = await registerAndGetCookie('coplayer-a@test.com', 'CoPlayerA');
+    const { user: userB } = await registerAndGetCookie('coplayer-b@test.com', 'CoPlayerB');
+
+    // Only 2 AI here (not 3) so the room stays at 3 players — 'waiting' — until
+    // userB joins as the 4th, which is what actually triggers game_started; awaiting
+    // game_started before userB connects would deadlock, so we only wait on room_joined.
+    const ws = await connect();
+    const createdP = waitMsg(ws, m => m.type === 'room_created');
+    ws.send(JSON.stringify({
+      type: 'create_room', playerId: 'coplayer-p0', userId: userA.id, displayName: 'CoPlayerA',
+      aiPlayers: [{ skill: 'rookie' }, { skill: 'rookie' }],
+    }));
+    const { roomCode } = await createdP;
+
+    const ws2 = await connect();
+    const joinedP = waitMsg(ws2, m => m.type === 'room_joined');
+    ws2.send(JSON.stringify({ type: 'join_room', roomCode, playerId: 'coplayer-p1', userId: userB.id, displayName: 'CoPlayerB' }));
+    await joinedP;
+
+    const room = rooms.get(roomCode);
+    room.round.matchOver = true;
+    room.phase = 'ended';
+    persistRoom(room);
+
+    const { body } = await nodeRequest('GET', '/api/admin/users', null, await adminCookie());
+    const me = body.users.find(u => u.id === userA.id);
+    assert.ok(me.coPlayers.includes('CoPlayerB'), `expected CoPlayerB in ${JSON.stringify(me.coPlayers)}`);
+    ws.close();
+    ws2.close();
+  });
+
+  test('pushEnabled reflects whether the user has a push subscription row', async () => {
+    const { user } = await registerAndGetCookie('pushuser@test.com', 'PushUser');
+    const { run } = await import('../db.js');
+
+    let body = (await nodeRequest('GET', '/api/admin/users', null, await adminCookie())).body;
+    let me = body.users.find(u => u.id === user.id);
+    assert.equal(me.pushEnabled, false);
+
+    run(
+      `INSERT INTO push_subscriptions (user_id, endpoint, subscription_json) VALUES (?, ?, ?)`,
+      [user.id, `https://push.example.com/${user.id}`, '{}']
+    );
+
+    body = (await nodeRequest('GET', '/api/admin/users', null, await adminCookie())).body;
+    me = body.users.find(u => u.id === user.id);
+    assert.equal(me.pushEnabled, true);
   });
 });
 
