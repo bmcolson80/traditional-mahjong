@@ -819,11 +819,13 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
   function handleWSMessage(msg) {
     switch (msg.type) {
       case 'room_created':
+        pendingAutoJoin = null;
         state.roomCode = msg.roomCode;
         state.isHost = true;
         enterWaitingRoom();
         break;
       case 'room_joined':
+        pendingAutoJoin = null;
         state.roomCode = msg.roomCode;
         state.mySeat = msg.seat;
         // Rejoin an active game → room_state arrives immediately after and renders game
@@ -860,6 +862,14 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
         alert(msg.matchOver ? 'Wall exhausted — draw. Match complete.' : 'Wall exhausted — hand is a draw.');
         break;
       case 'error':
+        if (pendingAutoJoin && msg.message === 'Room not found') {
+          pendingAutoJoin.attempts++;
+          if (pendingAutoJoin.attempts < 5) {
+            setTimeout(() => sendWhenConnected({ type: 'join_room', roomCode: pendingAutoJoin.code, playerId: state.playerId, userId: state.user.id, displayName: state.user.name }), 1000);
+            break;
+          }
+          pendingAutoJoin = null;
+        }
         console.error('Server rejected action:', msg.message);
         alert(msg.message);
         setButtonsEnabled(true);
@@ -1733,10 +1743,40 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
       const user = await apiCall('/api/me');
       state.user = user;
       enterDashboard();
+      maybeAutoJoinFromURL();
     } catch {
       showScreen('auth');
     }
   })();
+
+  // ---------- Auto create/join from a GamesNight invite link ----------
+  let pendingAutoJoin = null; // { code, attempts }
+
+  function maybeAutoJoinFromURL() {
+    const params = new URLSearchParams(location.search);
+    const createCode = params.get('createRoom');
+    const joinCode = params.get('joinRoom');
+    if (!createCode && !joinCode) return;
+
+    const url = new URL(location.href);
+    url.searchParams.delete('createRoom');
+    url.searchParams.delete('joinRoom');
+    history.replaceState({}, '', url);
+
+    if (createCode) {
+      sendWhenConnected({
+        type: 'create_room',
+        playerId: state.playerId,
+        userId: state.user.id,
+        displayName: state.user.name,
+        aiPlayers: [],
+        roomCode: createCode,
+      });
+    } else if (joinCode) {
+      pendingAutoJoin = { code: joinCode, attempts: 0 };
+      sendWhenConnected({ type: 'join_room', roomCode: joinCode, playerId: state.playerId, userId: state.user.id, displayName: state.user.name });
+    }
+  }
 
 
   // Game menu button → back to dashboard
