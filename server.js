@@ -479,6 +479,7 @@ function publicRoomView(room, forSeat) {
     round: room.round,
     roundWind: G.getRoundWind(room),
     currentDiscard: room.currentDiscard,
+    discardPile: room.discardPile,
     wallCount: room.wall.length,
     hostPlayerId: room.hostPlayerId,
     hostUserId: room.hostUserId ?? null,
