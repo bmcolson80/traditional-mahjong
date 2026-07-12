@@ -5,6 +5,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import cookie from 'cookie';
 import webpush from 'web-push';
+import { Resend } from 'resend';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
@@ -18,6 +19,9 @@ const app = express();
 const server = http.createServer(app);
 
 const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-me';
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const EMAIL_DOMAIN = process.env.EMAIL_DOMAIN ?? 'example.com';
+const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
 
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
@@ -28,7 +32,6 @@ if (pushConfigured) {
 }
 
 const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'bmcolson80@gmail.com').toLowerCase();
-const HUB_URL = process.env.HUB_URL || 'http://localhost:4000';
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -68,68 +71,47 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-// ── GamesNight hub — canonical account store ────────────────
-// The hub owns the real password now; every auth route here proxies to it
-// so "register on Mah Jong" and "register on the hub" are the same account.
-async function callHub(path, body) {
-  const hubRes = await fetch(`${HUB_URL}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const data = await hubRes.json().catch(() => ({}));
-  const setCookie = hubRes.headers.get('set-cookie') || '';
-  const match = setCookie.match(/gamesnight_token=([^;]+)/);
-  return { ok: hubRes.ok, status: hubRes.status, data, token: match ? match[1] : null };
-}
-
-// Given a hub-issued JWT (from a proxied auth call or the /sso handoff),
-// establish a local session: look the account up by email (users.id here
-// is an AUTOINCREMENT integer, so unlike a TEXT-keyed app we can't adopt
-// the hub's id verbatim), creating a local mirror row if this account has
-// never been seen here before, then mint our own local token — cookies
-// can't cross origins, so each app always needs its own session.
-async function establishLocalSession(token, res) {
-  const payload = jwt.verify(token, JWT_SECRET);
-  const email = payload.email.toLowerCase();
-  let user = get('SELECT * FROM users WHERE email = ?', [email]);
-  if (!user) {
-    const hash = bcrypt.hashSync(randomUUID(), 10);
-    run('INSERT INTO users (email, name, password_hash) VALUES (?, ?, ?)', [email, payload.name, hash]);
-    user = get('SELECT * FROM users WHERE email = ?', [email]);
-  }
-  setAuthCookie(res, signToken(user));
-  return user;
-}
-
 // ---------- Auth routes ----------
 
 app.post('/api/register', async (req, res) => {
-  const { email, name, password } = req.body ?? {};
-  let result;
-  try { result = await callHub('/api/register', { email, name, password }); }
-  catch { return res.status(502).json({ error: 'Account service is unreachable. Please try again shortly.' }); }
-  if (!result.ok) return res.status(result.status).json(result.data);
-  if (!result.token) return res.status(502).json({ error: 'Unexpected response from account service.' });
+  try {
+    const { email, name, password } = req.body ?? {};
+    if (!email || !name || !password) return res.status(400).json({ error: 'Missing fields' });
+    if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
 
-  let user;
-  try { user = await establishLocalSession(result.token, res); }
-  catch { return res.status(502).json({ error: 'Could not establish session.' }); }
-  res.json({ id: user.id, email: user.email, name: user.name, isAdmin: user.email.toLowerCase() === ADMIN_EMAIL });
+    const existing = get('SELECT id FROM users WHERE email = ?', [email.toLowerCase()]);
+    if (existing) return res.status(409).json({ error: 'Email already registered' });
+
+    const hash = bcrypt.hashSync(password, 10);
+    run('INSERT INTO users (email, name, password_hash) VALUES (?, ?, ?)', [email.toLowerCase(), name, hash]);
+    const user = get('SELECT * FROM users WHERE email = ?', [email.toLowerCase()]);
+
+    const token = signToken(user);
+    setAuthCookie(res, token);
+    res.json({ id: user.id, email: user.email, name: user.name, isAdmin: user.email.toLowerCase() === ADMIN_EMAIL });
+  } catch (err) {
+    console.error('Register error:', err);
+    res.status(500).json({ error: 'Registration failed' });
+  }
 });
 
 app.post('/api/login', async (req, res) => {
-  const { email, password } = req.body ?? {};
-  let result;
-  try { result = await callHub('/api/login', { email, password }); }
-  catch { return res.status(502).json({ error: 'Account service is unreachable. Please try again shortly.' }); }
-  if (!result.ok) return res.status(result.status).json(result.data);
-  if (!result.token) return res.status(502).json({ error: 'Unexpected response from account service.' });
+  try {
+    const { email, password } = req.body ?? {};
+    if (!email || !password) return res.status(400).json({ error: 'Missing fields' });
 
-  let user;
-  try { user = await establishLocalSession(result.token, res); }
-  catch { return res.status(502).json({ error: 'Could not establish session.' }); }
-  res.json({ id: user.id, email: user.email, name: user.name, isAdmin: user.email.toLowerCase() === ADMIN_EMAIL });
+    const user = get('SELECT * FROM users WHERE email = ?', [email.toLowerCase()]);
+    if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    const token = signToken(user);
+    setAuthCookie(res, token);
+    res.json({ id: user.id, email: user.email, name: user.name, isAdmin: user.email.toLowerCase() === ADMIN_EMAIL });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Login failed' });
+  }
 });
 
 app.post('/api/logout', (req, res) => {
@@ -150,8 +132,19 @@ app.get('/api/me', requireAuth, (req, res) => {
 app.get('/sso', async (req, res) => {
   const { token, createRoom, joinRoom } = req.query;
   if (token) {
-    try { await establishLocalSession(token, res); }
-    catch { /* invalid/expired token — fall through unauthenticated */ }
+    try {
+      const payload = jwt.verify(token, JWT_SECRET);
+      const email = payload.email.toLowerCase();
+      let user = get('SELECT * FROM users WHERE email = ?', [email]);
+      if (!user) {
+        const hash = bcrypt.hashSync(randomUUID(), 10);
+        run('INSERT INTO users (email, name, password_hash) VALUES (?, ?, ?)', [email, payload.name, hash]);
+        user = get('SELECT * FROM users WHERE email = ?', [email]);
+      }
+      setAuthCookie(res, signToken(user));
+    } catch {
+      // invalid/expired token — fall through unauthenticated
+    }
   }
   const params = new URLSearchParams();
   if (createRoom) params.set('createRoom', createRoom);
@@ -160,43 +153,70 @@ app.get('/sso', async (req, res) => {
   res.redirect('/' + (qs ? '?' + qs : ''));
 });
 
-// Password reset — proxied through the hub, which now owns the real
-// password. This app's request/verify/complete contract stays the same so
-// the frontend doesn't need to change.
+// Password reset: request OTP
 app.post('/api/password-reset/request', async (req, res) => {
-  const { email } = req.body ?? {};
   try {
-    const result = await callHub('/api/forgot-password', { email });
-    res.status(result.status).json(result.data);
-  } catch {
-    res.status(502).json({ error: 'Account service is unreachable. Please try again shortly.' });
+    const { email } = req.body ?? {};
+    if (!email) return res.status(400).json({ error: 'Email required' });
+    const user = get('SELECT * FROM users WHERE email = ?', [email.toLowerCase()]);
+    // Always respond success to avoid leaking which emails are registered
+    if (!user) return res.json({ ok: true });
+
+    const otp = String(Math.floor(100000 + Math.random() * 900000));
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    run('INSERT INTO otp_requests (email, otp, expires_at) VALUES (?, ?, ?)', [email.toLowerCase(), otp, expiresAt]);
+
+    if (resend) {
+      await resend.emails.send({
+        from: `Mahjong <noreply@${EMAIL_DOMAIN}>`,
+        to: email,
+        subject: 'Your password reset code',
+        html: `<p>Your verification code is <strong>${otp}</strong>. It expires in 15 minutes.</p>`,
+      });
+    } else {
+      console.log(`[dev] OTP for ${email}: ${otp}`);
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('OTP request error:', err);
+    res.status(500).json({ error: 'Could not send reset code' });
   }
 });
 
-app.post('/api/password-reset/verify', async (req, res) => {
-  const { email, otp } = req.body ?? {};
+app.post('/api/password-reset/verify', (req, res) => {
   try {
-    const result = await callHub('/api/verify-otp', { email, code: otp });
-    if (!result.ok) return res.status(result.status).json(result.data);
+    const { email, otp } = req.body ?? {};
+    const record = get(
+      `SELECT * FROM otp_requests WHERE email = ? AND otp = ? AND used = 0 ORDER BY id DESC LIMIT 1`,
+      [email?.toLowerCase(), otp]
+    );
+    if (!record) return res.status(400).json({ error: 'Invalid code' });
+    if (new Date(record.expires_at) < new Date()) return res.status(400).json({ error: 'Code expired' });
     res.json({ ok: true });
-  } catch {
-    res.status(502).json({ error: 'Account service is unreachable. Please try again shortly.' });
+  } catch (err) {
+    console.error('OTP verify error:', err);
+    res.status(500).json({ error: 'Verification failed' });
   }
 });
 
-app.post('/api/password-reset/complete', async (req, res) => {
-  const { email, otp, newPassword } = req.body ?? {};
-  if (!newPassword || newPassword.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+app.post('/api/password-reset/complete', (req, res) => {
   try {
-    // The hub's OTP isn't consumed by verify — only by reset-password — so
-    // re-verifying here to mint a fresh resetToken is safe and idempotent.
-    const verifyResult = await callHub('/api/verify-otp', { email, code: otp });
-    if (!verifyResult.ok) return res.status(verifyResult.status).json(verifyResult.data);
-    const resetResult = await callHub('/api/reset-password', { resetToken: verifyResult.data.resetToken, newPassword });
-    if (!resetResult.ok) return res.status(resetResult.status).json(resetResult.data);
+    const { email, otp, newPassword } = req.body ?? {};
+    if (!newPassword || newPassword.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    const record = get(
+      `SELECT * FROM otp_requests WHERE email = ? AND otp = ? AND used = 0 ORDER BY id DESC LIMIT 1`,
+      [email?.toLowerCase(), otp]
+    );
+    if (!record) return res.status(400).json({ error: 'Invalid code' });
+    if (new Date(record.expires_at) < new Date()) return res.status(400).json({ error: 'Code expired' });
+
+    const hash = bcrypt.hashSync(newPassword, 10);
+    run('UPDATE users SET password_hash = ? WHERE email = ?', [hash, email.toLowerCase()]);
+    run('UPDATE otp_requests SET used = 1 WHERE id = ?', [record.id]);
     res.json({ ok: true });
-  } catch {
-    res.status(502).json({ error: 'Account service is unreachable. Please try again shortly.' });
+  } catch (err) {
+    console.error('Password reset complete error:', err);
+    res.status(500).json({ error: 'Reset failed' });
   }
 });
 
@@ -384,13 +404,6 @@ app.get('/api/admin/users', requireAuth, requireAdmin, (req, res) => {
     console.error('admin users error:', err);
     res.status(500).json({ error: 'Failed to load users' });
   }
-});
-
-// One-time export for migrating accounts into the GamesNight hub's users
-// table. Remove once the migration has been run.
-app.get('/api/admin/export-users', requireAuth, requireAdmin, (req, res) => {
-  const users = all('SELECT id, email, name, password_hash, created_at FROM users');
-  res.json({ users });
 });
 
 // Lets the host end one of their games straight from the dashboard list — no

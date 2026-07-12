@@ -1,59 +1,27 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { WebSocket } from 'ws';
-import { spawn } from 'node:child_process';
-import fs from 'node:fs';
 
 process.env.NODE_ENV = 'test';
 process.env.DB_PATH = './test/e2e-test.db';
 process.env.PORT = '3901';
 process.env.JWT_SECRET = 'test-secret';
-process.env.HUB_URL = 'http://localhost:4901';
 
 const { startServer, server, rooms, persistRoom } = await import('../server.js');
 
 let baseUrl;
-let hubProcess;
-
-// /api/register and password-reset routes now proxy to the GamesNight hub
-// (the sibling gamesnight-hub repo owns the real password) rather than
-// checking a local table directly, so any test that hits those routes
-// needs a real hub instance to talk to — spin one up as a child process on
-// a dedicated test port, using the same JWT_SECRET so its issued tokens
-// verify here.
-const HUB_REPO_PATH = '/Users/colsons/gamesnight-hub';
-const HUB_TEST_DB    = '/tmp/gamesnight-hub-mahjong-test.db';
-
-async function waitForHubReady(url, timeoutMs = 8000) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const res = await fetch(`${url}/health`);
-      if (res.ok) return;
-    } catch { /* not up yet */ }
-    await new Promise(r => setTimeout(r, 100));
-  }
-  throw new Error('gamesnight-hub did not become ready in time — is it checked out at ' + HUB_REPO_PATH + '?');
-}
 
 before(async () => {
-  try { fs.unlinkSync(HUB_TEST_DB); } catch { /* ignore */ }
-  hubProcess = spawn('node', ['server.js'], {
-    cwd: HUB_REPO_PATH,
-    env: { ...process.env, PORT: '4901', JWT_SECRET: 'test-secret', DB_PATH: HUB_TEST_DB },
-    stdio: 'ignore',
-  });
-  await waitForHubReady(process.env.HUB_URL);
-
   await startServer();
   baseUrl = `http://localhost:${process.env.PORT}`;
 });
 
 after(async () => {
   await new Promise((resolve) => server.close(resolve));
-  hubProcess?.kill();
-  try { fs.unlinkSync(process.env.DB_PATH); } catch { /* ignore cleanup errors */ }
-  try { fs.unlinkSync(HUB_TEST_DB); } catch { /* ignore cleanup errors */ }
+  try {
+    const fs = await import('node:fs');
+    fs.unlinkSync(process.env.DB_PATH);
+  } catch { /* ignore cleanup errors */ }
 });
 
 function connect() {
