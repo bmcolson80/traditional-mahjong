@@ -33,6 +33,10 @@ if (pushConfigured) {
 
 const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'bmcolson80@gmail.com').toLowerCase();
 
+const HUB_URL              = process.env.HUB_URL || '';
+const INTERNAL_SYNC_SECRET = process.env.INTERNAL_SYNC_SECRET || '';
+const GAMESNIGHT_HUB_URL   = process.env.GAMESNIGHT_HUB_URL || 'https://gamesnight-hub-production.up.railway.app';
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -71,6 +75,32 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+function requireInternalSecret(req, res, next) {
+  if (!INTERNAL_SYNC_SECRET || req.headers['x-internal-secret'] !== INTERNAL_SYNC_SECRET) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  next();
+}
+
+// Best-effort notify the hub of a new/changed local password so it can
+// replicate it to other sibling games. Never blocks or fails the caller —
+// register/login must keep working locally even if the hub is unreachable.
+async function pushAccountSyncToHub({ email, name, passwordHash }) {
+  if (!HUB_URL || !INTERNAL_SYNC_SECRET) return;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    await fetch(`${HUB_URL}/api/internal/sync-account`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Internal-Secret': INTERNAL_SYNC_SECRET },
+      body: JSON.stringify({ email, name, passwordHash, sourceGameId: 'mahjong' }),
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeout));
+  } catch (err) {
+    console.error('[sync-account] Failed to push to hub:', err.message);
+  }
+}
+
 // ---------- Auth routes ----------
 
 app.post('/api/register', async (req, res) => {
@@ -85,6 +115,7 @@ app.post('/api/register', async (req, res) => {
     const hash = bcrypt.hashSync(password, 10);
     run('INSERT INTO users (email, name, password_hash) VALUES (?, ?, ?)', [email.toLowerCase(), name, hash]);
     const user = get('SELECT * FROM users WHERE email = ?', [email.toLowerCase()]);
+    pushAccountSyncToHub({ email: user.email, name: user.name, passwordHash: hash });
 
     const token = signToken(user);
     setAuthCookie(res, token);
@@ -120,7 +151,7 @@ app.post('/api/logout', (req, res) => {
 });
 
 app.get('/api/me', requireAuth, (req, res) => {
-  res.json({ ...req.user, isAdmin: req.user.email.toLowerCase() === ADMIN_EMAIL });
+  res.json({ ...req.user, isAdmin: req.user.email.toLowerCase() === ADMIN_EMAIL, hubUrl: GAMESNIGHT_HUB_URL });
 });
 
 // ── SSO handoff from GamesNight hub ─────────────────────────
@@ -151,6 +182,22 @@ app.get('/sso', async (req, res) => {
   if (joinRoom)   params.set('joinRoom', joinRoom);
   const qs = params.toString();
   res.redirect('/' + (qs ? '?' + qs : ''));
+});
+
+// Receives a replicated account (email/name/password hash) from the hub —
+// either the hub's own account or one pushed here from another sibling game.
+// Internal-secret-gated, not a user session route.
+app.post('/api/internal/sync-account', requireInternalSecret, (req, res) => {
+  const { email, name, passwordHash } = req.body ?? {};
+  if (!email || !name || !passwordHash) return res.status(400).json({ error: 'email, name and passwordHash required' });
+  const normalizedEmail = email.toLowerCase();
+  const existing = get('SELECT id FROM users WHERE email = ?', [normalizedEmail]);
+  if (existing) {
+    run('UPDATE users SET name = ?, password_hash = ? WHERE email = ?', [name, passwordHash, normalizedEmail]);
+  } else {
+    run('INSERT INTO users (email, name, password_hash) VALUES (?, ?, ?)', [normalizedEmail, name, passwordHash]);
+  }
+  res.json({ ok: true });
 });
 
 // Password reset: request OTP
@@ -213,6 +260,8 @@ app.post('/api/password-reset/complete', (req, res) => {
     const hash = bcrypt.hashSync(newPassword, 10);
     run('UPDATE users SET password_hash = ? WHERE email = ?', [hash, email.toLowerCase()]);
     run('UPDATE otp_requests SET used = 1 WHERE id = ?', [record.id]);
+    const user = get('SELECT * FROM users WHERE email = ?', [email.toLowerCase()]);
+    pushAccountSyncToHub({ email: user.email, name: user.name, passwordHash: hash });
     res.json({ ok: true });
   } catch (err) {
     console.error('Password reset complete error:', err);
@@ -303,12 +352,8 @@ app.get('/api/my-games', requireAuth, (req, res) => {
 });
 
 // ── Admin ────────────────────────────────────────────────────
-// The HTML shell itself has no sensitive data — access control happens
-// at the /api/admin/* endpoints below, which the page calls client-side.
-app.get('/admin', (_, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
-});
-
+// The per-game /admin UI has been retired — the GamesNight hub now calls
+// these same endpoints to render a single consolidated dashboard.
 // Aggregate usage stats for the admin. Gated by ADMIN_EMAIL — see requireAdmin.
 app.get('/api/admin/stats', requireAuth, requireAdmin, (req, res) => {
   try {

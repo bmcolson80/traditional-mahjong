@@ -518,10 +518,9 @@ describe('/api/admin/users', () => {
 // ── /admin page + isAdmin flag ───────────────────────────────────────────────
 
 describe('/admin page', () => {
-  test('serves the admin HTML shell to anyone (gating happens client-side via the API)', async () => {
-    const { status, body } = await nodeRequestRaw('GET', '/admin');
-    assert.equal(status, 200);
-    assert.match(body, /admin/i);
+  test('no longer served here — retired in favor of the GamesNight hub\'s consolidated dashboard', async () => {
+    const { status } = await nodeRequestRaw('GET', '/admin');
+    assert.equal(status, 404);
   });
 });
 
