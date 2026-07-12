@@ -218,8 +218,11 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
 </head>
 <body>
 
+<!-- ═══ BOOT SCREEN (blank placeholder shown while session check resolves, avoids flashing the login screen for already-authenticated users) ═══ -->
+<div id="boot" class="screen active"></div>
+
 <!-- ═══ AUTH SCREEN ═══ -->
-<div id="auth" class="screen active">
+<div id="auth" class="screen">
   <div class="centered">
     <div class="logo-area">
       <div class="logo-tiles">
@@ -515,6 +518,8 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     fishingLocked: false, // true when it's my turn, I've declared fishing, and the drawn-tile discard is forced
     isHost: false,
     handOrder: [],        // client-side tile order for drag-to-rearrange, reconciled against server hand
+    handOrderIds: [],     // stable per-instance id for each handOrder entry (tile values can repeat), index-aligned with handOrder
+    nextTileInstanceId: 1,
     dealtHandKey: null,   // identifies the current hand, used to trigger the deal-in animation once per hand
     lastDiscardKey: null, // identifies the current discard, used to trigger the toss-in animation once per discard
   };
@@ -1091,6 +1096,7 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     const isNewDeal = dealKey !== null && dealKey !== state.dealtHandKey;
     if (isNewDeal) {
       state.handOrder = [];
+      state.handOrderIds = [];
       state.dealtHandKey = dealKey;
     }
     if (me && me.hand) reconcileHandOrder(me.hand);
@@ -1116,36 +1122,78 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     const remaining = {};
     for (const t of serverHand) remaining[t] = (remaining[t] || 0) + 1;
     const kept = [];
-    for (const t of state.handOrder) {
-      if (remaining[t] > 0) { kept.push(t); remaining[t]--; }
+    const keptIds = [];
+    for (let i = 0; i < state.handOrder.length; i++) {
+      const t = state.handOrder[i];
+      if (remaining[t] > 0) { kept.push(t); keptIds.push(state.handOrderIds[i]); remaining[t]--; }
     }
     const beforeNew = kept.length;
     for (const t of serverHand) {
-      if (remaining[t] > 0) { kept.push(t); remaining[t]--; }
+      if (remaining[t] > 0) { kept.push(t); keptIds.push(state.nextTileInstanceId++); remaining[t]--; }
     }
     state.lastAppendedCount = kept.length - beforeNew;
     state.handOrder = kept;
+    state.handOrderIds = keptIds;
   }
 
   function renderHand(isNewDeal) {
     cancelActiveDrag();
     const handRow = document.getElementById('handRow');
-    handRow.innerHTML = '';
-    const total = state.handOrder.length;
-    const freshCount = isNewDeal ? total : (state.lastAppendedCount || 0);
-    const freshStart = total - freshCount;
-    const freshEls = [];
+
+    if (isNewDeal) {
+      // Fresh hand — every tile is new, full rebuild + fly-in is correct.
+      handRow.innerHTML = '';
+      state.handOrder.forEach((tile, index) => {
+        const el = makeTileEl(tile, state.handOrderIds[index]);
+        el.classList.add('selectable');
+        if (state.selectedTile === tile) el.classList.add('selected');
+        el.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
+        attachTileDrag(el);
+        handRow.appendChild(el);
+      });
+      Array.from(handRow.children).forEach((el, i) => flyTileFromWall(el, i * 60));
+      return;
+    }
+
+    // Reuse existing DOM elements keyed by their stable tile-instance id so
+    // untouched tiles just slide (FLIP) to their new slot instead of the
+    // whole hand being torn down and rebuilt on every reorder/reconcile.
+    const existingById = new Map();
+    for (const el of handRow.children) existingById.set(el.dataset.tileId, el);
+
+    const firstRects = new Map();
+    for (const el of existingById.values()) firstRects.set(el, el.getBoundingClientRect());
+
+    const usedIds = new Set();
+    const ordered = [];
+    const newEls = [];
     state.handOrder.forEach((tile, index) => {
-      const el = makeTileEl(tile);
-      el.classList.add('selectable');
-      if (state.selectedTile === tile) el.classList.add('selected');
-      el.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
-      attachTileDrag(el);
-      handRow.appendChild(el);
-      if (index >= freshStart) freshEls.push({ el, stagger: index - freshStart });
+      const id = String(state.handOrderIds[index]);
+      usedIds.add(id);
+      let el = existingById.get(id);
+      if (!el) {
+        el = makeTileEl(tile, id);
+        el.classList.add('selectable');
+        el.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
+        attachTileDrag(el);
+        newEls.push(el);
+      }
+      el.classList.toggle('selected', state.selectedTile === tile);
+      ordered.push(el);
     });
-    // Tiles just dealt/drawn fly in from the wall's current on-screen position
-    for (const { el, stagger } of freshEls) flyTileFromWall(el, stagger * 60);
+
+    // Tiles no longer in hand (discarded/claimed) drop out immediately
+    for (const [id, el] of existingById) {
+      if (!usedIds.has(id)) el.remove();
+    }
+
+    for (const el of ordered) handRow.appendChild(el);
+
+    // Slide reused tiles from their old position into the new one
+    flipSiblings(ordered, firstRects);
+
+    // Newly drawn tiles fly in from the wall's current on-screen position
+    newEls.forEach((el, i) => flyTileFromWall(el, i * 60));
   }
 
   // ---------- Tile wall (border of face-down tiles around the table) ----------
@@ -1326,6 +1374,7 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
         if (dragging) {
           teardown();
           state.handOrder = moveItem(state.handOrder, fromIndex, placeholderIndex);
+          state.handOrderIds = moveItem(state.handOrderIds, fromIndex, placeholderIndex);
           renderHand(false);
         } else {
           teardown();
@@ -1597,11 +1646,12 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     return '';
   }
 
-  function makeTileEl(tile) {
+  function makeTileEl(tile, id) {
     const div = document.createElement('div');
     div.className = 'tile';
     div.innerHTML = tileSVG(tile);
     div.title = formatTile(tile);
+    if (id !== undefined) div.dataset.tileId = String(id);
     return div;
   }
 
