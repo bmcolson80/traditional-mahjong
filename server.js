@@ -406,6 +406,14 @@ app.get('/api/admin/users', requireAuth, requireAdmin, (req, res) => {
   }
 });
 
+// One-time export for migrating accounts into the GamesNight hub's users
+// table. Read-only, admin-gated — does not change login/register behavior.
+// Remove once the migration has been run.
+app.get('/api/admin/export-users', requireAuth, requireAdmin, (req, res) => {
+  const users = all('SELECT id, email, name, password_hash, created_at FROM users');
+  res.json({ users });
+});
+
 // Lets the host end one of their games straight from the dashboard list — no
 // need to rejoin first. Works whether or not the room is currently loaded in
 // memory (e.g. after a server restart, it's restored lazily from the DB here).
