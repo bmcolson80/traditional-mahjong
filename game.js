@@ -284,8 +284,20 @@ export function discardTile(room, player, tile) {
   if (idx === -1) throw new Error('Tile not in hand');
   player.hand.splice(idx, 1);
   room.currentDiscard = { tile, fromSeat: player.seat };
-  room.discardPile.push(tile);
+  room.discardPile.push({ tile, fromSeat: player.seat });
   return tile;
+}
+
+// Removes one instance of `tile` from the discard pile when it's claimed into a
+// meld (pung/kong/chow) — a claimed tile is no longer sitting in the discards,
+// it's now visible in the claimer's exposed sets, so it must not appear in both.
+function removeFromDiscardPile(room, tile) {
+  for (let i = room.discardPile.length - 1; i >= 0; i--) {
+    if (room.discardPile[i].tile === tile) {
+      room.discardPile.splice(i, 1);
+      return;
+    }
+  }
 }
 
 // Returns the next seat after `seat`, cycling only through `activeSeats` (defaults to
@@ -325,6 +337,7 @@ export function applyPung(room, player, tile, fromSeat) {
   const removed = takeFromHand(player.hand, tile, 2);
   player.exposed.push({ type: 'pung', tiles: [...removed, tile], from: fromSeat });
   room.currentDiscard = null;
+  removeFromDiscardPile(room, tile);
 }
 
 export function applyKong(room, player, tile, fromSeat, concealed = false) {
@@ -333,6 +346,7 @@ export function applyKong(room, player, tile, fromSeat, concealed = false) {
   const tiles = concealed ? removed : [...removed, tile];
   player.exposed.push({ type: 'kong', tiles, from: fromSeat ?? player.seat, concealed });
   room.currentDiscard = null;
+  if (!concealed) removeFromDiscardPile(room, tile);
   // replacement tile from dead wall
   const repl = room.deadWall.length > 0 ? room.deadWall.pop() : room.wall.shift();
   if (repl) {
@@ -347,6 +361,7 @@ export function applyChow(room, player, sequenceTiles, claimedTile, fromSeat) {
   for (const t of need) takeFromHand(player.hand, t, 1);
   player.exposed.push({ type: 'chow', tiles: sequenceTiles, from: fromSeat });
   room.currentDiscard = null;
+  removeFromDiscardPile(room, claimedTile);
 }
 
 function takeFromHand(hand, tile, count) {

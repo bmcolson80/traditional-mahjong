@@ -156,7 +156,10 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
 .game-section{background:rgba(15,25,20,.6);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);border-radius:var(--radius);padding:12px;margin-bottom:10px;border:1px solid rgba(201,162,39,.15)}
 .game-section-title{font-family:'Cinzel',serif;font-size:10px;letter-spacing:2px;color:rgba(201,162,39,.7);margin-bottom:8px}
 .discard-area{text-align:center}
-.discard-tile{display:inline-block;margin-top:6px}
+.discard-pile{display:flex;flex-wrap:wrap;justify-content:center;gap:3px;margin-top:6px;max-height:108px;overflow-y:auto;padding:2px}
+.discard-pile .tile{width:22px;flex-shrink:0;cursor:default}
+.discard-pile .tile.tile-latest{outline:2px solid var(--gold);box-shadow:0 0 6px rgba(201,162,39,.7)}
+.discard-empty{font-size:11px;color:rgba(255,255,255,.3);letter-spacing:1px;padding:8px 0}
 .exposed-sets{display:flex;gap:8px;flex-wrap:wrap}
 .exposed-set{display:flex;gap:2px;background:rgba(0,0,0,.2);padding:4px;border-radius:6px}
 
@@ -472,9 +475,9 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
           <div id="allExposedSets"></div>
         </div>
         <div class="game-section discard-area">
-          <div class="game-section-title">DISCARD</div>
+          <div class="game-section-title">DISCARDS</div>
           <div id="currentDiscardLabel" style="font-size:11px;color:rgba(255,255,255,.5);letter-spacing:1px;margin-bottom:4px"></div>
-          <div class="discard-tile" id="currentDiscardTile"></div>
+          <div class="discard-pile" id="discardPile"></div>
         </div>
         <div class="wall-count-label" id="wallCountLabel"></div>
       </div>
@@ -1027,22 +1030,36 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     // Tile wall around the table frame — exact remaining count, split across the 4 sides
     renderWall(room.wallCount ?? 0);
 
-    // discard
-    const discardTileEl = document.getElementById('currentDiscardTile');
+    // discard pile — every tile discarded this hand (claimed tiles are removed
+    // server-side since they move to the claimer's exposed sets instead)
+    const discardPileEl = document.getElementById('discardPile');
     const discardLabel = document.getElementById('currentDiscardLabel');
-    discardTileEl.innerHTML = '';
+    discardPileEl.innerHTML = '';
+    const pile = room.discardPile || [];
     if (room.currentDiscard) {
-      discardLabel.textContent = `Discarded by ${room.currentDiscard.fromSeat}`;
-      const discardKey = `${room.currentDiscard.tile}_${room.currentDiscard.fromSeat}`;
-      const tileEl = makeTileEl(room.currentDiscard.tile);
-      if (discardKey !== state.lastDiscardKey) {
-        tileEl.classList.add('tile-toss');
-        state.lastDiscardKey = discardKey;
-      }
-      discardTileEl.appendChild(tileEl);
+      discardLabel.textContent = `Last discarded by ${room.currentDiscard.fromSeat} · ${pile.length} in pile`;
     } else {
-      discardLabel.textContent = 'No discard yet';
-      state.lastDiscardKey = null;
+      discardLabel.textContent = pile.length ? `${pile.length} in pile` : 'No discards yet';
+    }
+    if (pile.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'discard-empty';
+      empty.textContent = 'No discards yet';
+      discardPileEl.appendChild(empty);
+    } else {
+      const discardKey = room.currentDiscard ? `${room.currentDiscard.tile}_${room.currentDiscard.fromSeat}_${pile.length}` : null;
+      pile.forEach((d, i) => {
+        const tileEl = makeTileEl(d.tile);
+        tileEl.title = `${formatTile(d.tile)} — discarded by ${d.fromSeat}`;
+        const isLatest = i === pile.length - 1;
+        if (isLatest) {
+          tileEl.classList.add('tile-latest');
+          if (discardKey !== state.lastDiscardKey) tileEl.classList.add('tile-toss');
+        }
+        discardPileEl.appendChild(tileEl);
+      });
+      if (discardKey !== null) state.lastDiscardKey = discardKey;
+      discardPileEl.scrollTop = discardPileEl.scrollHeight;
     }
 
     // exposed sets for all players
