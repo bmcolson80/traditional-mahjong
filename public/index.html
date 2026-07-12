@@ -380,7 +380,7 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
       <div class="avatar" id="userAvatar">?</div>
       <span class="user-name-display" id="dashName"></span>
       <button class="btn btn-secondary btn-sm" id="dashRulesBtn">Rules</button>
-      <button class="btn btn-secondary btn-sm" id="dashAdminBtn" style="display:none" onclick="window.location.href='/admin'">Admin</button>
+      <button class="btn btn-secondary btn-sm" id="dashHubBtn">GamesNight</button>
       <button class="btn btn-secondary btn-sm" id="logoutBtn">Sign Out</button>
     </div>
   </div>
@@ -615,7 +615,9 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
   async function enterDashboard() {
     document.getElementById('dashName').textContent = state.user.name;
     document.getElementById('userAvatar').textContent = (state.user.name || '?')[0].toUpperCase();
-    document.getElementById('dashAdminBtn').style.display = state.user.isAdmin ? '' : 'none';
+    document.getElementById('dashHubBtn').onclick = () => {
+      window.location.href = state.user.hubUrl || 'https://gamesnight-hub-production.up.railway.app';
+    };
     state.pendingAiSlots = state.pendingAiSlots || [];
     renderDashAiSlots();
     showScreen('dashboard');
