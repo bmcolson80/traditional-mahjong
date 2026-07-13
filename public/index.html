@@ -1825,11 +1825,13 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     const params = new URLSearchParams(location.search);
     const createCode = params.get('createRoom');
     const joinCode = params.get('joinRoom');
-    if (!createCode && !joinCode) return;
+    const resumeCode = params.get('resumeRoom');
+    if (!createCode && !joinCode && !resumeCode) return;
 
     const url = new URL(location.href);
     url.searchParams.delete('createRoom');
     url.searchParams.delete('joinRoom');
+    url.searchParams.delete('resumeRoom');
     history.replaceState({}, '', url);
 
     if (createCode) {
@@ -1844,6 +1846,15 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     } else if (joinCode) {
       pendingAutoJoin = { code: joinCode, attempts: 0 };
       sendWhenConnected({ type: 'join_room', roomCode: joinCode, playerId: state.playerId, userId: state.user.id, displayName: state.user.name });
+    } else if (resumeCode) {
+      state.roomCode = resumeCode;
+      state.isHost = false;
+      sendWhenConnected({
+        type: 'rejoin_room',
+        roomCode: resumeCode,
+        playerId: state.playerId,
+        userId: state.user && state.user.id,
+      });
     }
   }
 

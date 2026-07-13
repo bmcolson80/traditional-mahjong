@@ -161,7 +161,7 @@ app.get('/api/me', requireAuth, (req, res) => {
 // the account up (or create it) by email and mint our own local session,
 // exactly as if they'd logged in directly.
 app.get('/sso', async (req, res) => {
-  const { token, createRoom, joinRoom } = req.query;
+  const { token, createRoom, joinRoom, resumeRoom } = req.query;
   if (token) {
     try {
       const payload = jwt.verify(token, JWT_SECRET);
@@ -180,6 +180,7 @@ app.get('/sso', async (req, res) => {
   const params = new URLSearchParams();
   if (createRoom) params.set('createRoom', createRoom);
   if (joinRoom)   params.set('joinRoom', joinRoom);
+  if (resumeRoom) params.set('resumeRoom', resumeRoom);
   const qs = params.toString();
   res.redirect('/' + (qs ? '?' + qs : ''));
 });
@@ -328,6 +329,7 @@ app.get('/api/my-games', requireAuth, (req, res) => {
         const isHost = s.hostUserId != null
           ? s.hostUserId === req.user.id
           : (s.hostPlayerId === row.player_id) || (humans.length === 1 && humans[0].userId === req.user.id);
+        const turnPlayer = (s.players ?? []).find(p => p.seat === s.turnSeat);
         return {
           roomCode: row.room_code,
           phase: row.phase,
@@ -335,6 +337,8 @@ app.get('/api/my-games', requireAuth, (req, res) => {
           handNumber: s.round?.handNumber ?? 1,
           turnSeat: s.turnSeat,
           isHost,
+          yourTurn: row.phase === 'playing' && turnPlayer?.userId === req.user.id,
+          turnPlayerName: row.phase === 'playing' ? (turnPlayer?.displayName ?? null) : null,
           players: (s.players ?? []).map(p => ({
             displayName: p.displayName,
             seat: p.seat,
