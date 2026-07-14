@@ -10,7 +10,8 @@
     "dev:local": "PORT=3001 JWT_SECRET=azul-secret-change-in-production node --watch server.js",
     "test": "node --test test/game.test.js",
     "test:account-sync": "node --test test/account-sync.test.js",
-    "test:all": "node --test test/game.test.js test/e2e.test.js test/regression.test.js test/ai.test.js test/persistence.test.js test/special-hands.test.js test/account-sync.test.js"
+    "test:notifications": "node --test test/notifications.test.js",
+    "test:all": "node --test test/game.test.js test/e2e.test.js test/regression.test.js test/ai.test.js test/persistence.test.js test/special-hands.test.js test/account-sync.test.js test/notifications.test.js"
   },
   "dependencies": {
     "express": "^4.19.2",

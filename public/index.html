@@ -420,6 +420,23 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
           <span class="toggle-slider"></span>
         </label>
       </div>
+      <div class="notif-row">
+        <div class="notif-label">Email notifications</div>
+        <label class="toggle">
+          <input type="checkbox" id="emailToggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="section-title">PREFERENCES</div>
+    <div class="dash-card">
+      <div class="field-group">
+        <label>Display Name</label>
+        <input type="text" id="nameChangeInput" placeholder="Your name" maxlength="20">
+      </div>
+      <div class="error-msg" id="nameChangeError"></div>
+      <button class="btn btn-secondary" id="saveNameBtn">Save Name</button>
     </div>
 
   </div>
@@ -628,6 +645,8 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     showScreen('dashboard');
     setButtonsEnabled(true);
     initPushToggle();
+    initEmailToggle();
+    initNamePreference();
     await loadActiveGames();
   }
 
@@ -761,6 +780,46 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
     }
   }
 
+  // ---------- Email notifications ----------
+  async function initEmailToggle() {
+    const toggle = document.getElementById('emailToggle');
+    try {
+      const { user } = await apiCall('/api/profile');
+      toggle.checked = !!user.notifyEmail;
+      toggle.addEventListener('change', async () => {
+        try {
+          await apiCall('/api/profile/notify', { method: 'POST', body: JSON.stringify({ notifyEmail: toggle.checked }) });
+        } catch (err) {
+          console.error('Failed to update email preference:', err);
+        }
+      });
+    } catch {
+      toggle.disabled = true;
+    }
+  }
+
+  // ---------- Display name ----------
+  function initNamePreference() {
+    const input = document.getElementById('nameChangeInput');
+    const errEl = document.getElementById('nameChangeError');
+    input.value = state.user.name || '';
+    document.getElementById('saveNameBtn').onclick = async () => {
+      const name = input.value.trim();
+      errEl.style.display = 'none';
+      if (!name) { errEl.textContent = 'Enter a display name.'; errEl.style.display = 'block'; return; }
+      try {
+        const { user } = await apiCall('/api/profile/name', { method: 'POST', body: JSON.stringify({ name }) });
+        state.user = { ...state.user, name: user.name };
+        document.getElementById('dashName').textContent = user.name;
+        document.getElementById('userAvatar').textContent = (user.name || '?')[0].toUpperCase();
+        showToast('Name updated to ' + user.name);
+      } catch (err) {
+        errEl.textContent = err.message || 'Failed to update name';
+        errEl.style.display = 'block';
+      }
+    };
+  }
+
   function urlBase64ToUint8Array(base64String) {
     const padding = '='.repeat((4 - base64String.length % 4) % 4);
     const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -787,6 +846,12 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
       console.error('WS error:', ev);
     });
   }
+
+  // Lets the server suppress push/email when this exact room's tab is
+  // foregrounded — the server already sees the update live over this socket.
+  document.addEventListener('visibilitychange', () => {
+    wsSend({ type: 'visibility', visible: document.visibilityState === 'visible' });
+  });
 
   function wsSend(msg) {
     if (state.ws && state.ws.readyState === WebSocket.OPEN) state.ws.send(JSON.stringify(msg));
@@ -832,12 +897,14 @@ input.code-input{text-align:center;font-size:22px;letter-spacing:8px;font-weight
         pendingAutoJoin = null;
         state.roomCode = msg.roomCode;
         state.isHost = true;
+        wsSend({ type: 'visibility', visible: document.visibilityState === 'visible' });
         enterWaitingRoom();
         break;
       case 'room_joined':
         pendingAutoJoin = null;
         state.roomCode = msg.roomCode;
         state.mySeat = msg.seat;
+        wsSend({ type: 'visibility', visible: document.visibilityState === 'visible' });
         // Rejoin an active game → room_state arrives immediately after and renders game
         if (msg.phase === 'playing' || msg.phase === 'finished') {
           showScreen('game'); // avoid waiting room flash; room_state will fully render

@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT UNIQUE NOT NULL,
   name TEXT NOT NULL,
   password_hash TEXT NOT NULL,
+  notify_email INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -67,6 +68,9 @@ export async function initDB() {
   }
 
   db.run(SCHEMA);
+  // Migrate existing DBs — CREATE TABLE IF NOT EXISTS won't retrofit a
+  // column onto a users table that already existed before this field did.
+  try { db.run("ALTER TABLE users ADD COLUMN notify_email INTEGER NOT NULL DEFAULT 0"); } catch {}
   persist();
   return db;
 }

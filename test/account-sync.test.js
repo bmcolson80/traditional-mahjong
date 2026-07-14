@@ -101,4 +101,41 @@ describe('Internal sync-account endpoint', () => {
     });
     assert.equal(loginRes.status, 401);
   });
+
+  test('rejects a brand-new account with no passwordHash', async () => {
+    const email = `new-nohash-${Date.now()}@example.com`;
+    const res = await fetch(`${baseUrl}/api/internal/sync-account`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Internal-Secret': 'test-internal-secret' },
+      body: JSON.stringify({ email, name: 'No Hash', sourceGameId: 'azul' }),
+    });
+    assert.equal(res.status, 400);
+  });
+
+  // A name-only change (e.g. from another game's profile settings) has no new
+  // password hash to replicate — this must update the name without requiring
+  // or touching the password, and must NOT invalidate the existing password.
+  test('updates only the name for an existing account when passwordHash is omitted', async () => {
+    const email = `name-only-${Date.now()}@example.com`;
+    await fetch(`${baseUrl}/api/register`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, name: 'Old Name', password: 'staysthesame123' }),
+    });
+
+    const syncRes = await fetch(`${baseUrl}/api/internal/sync-account`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Internal-Secret': 'test-internal-secret' },
+      body: JSON.stringify({ email, name: 'New Name', sourceGameId: 'azul' }),
+    });
+    assert.equal(syncRes.status, 200);
+
+    // Password must still work — sync-account must not have touched it.
+    const loginRes = await fetch(`${baseUrl}/api/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: 'staysthesame123' }),
+    });
+    assert.equal(loginRes.status, 200);
+    const loginData = await loginRes.json();
+    assert.equal(loginData.name, 'New Name');
+  });
 });

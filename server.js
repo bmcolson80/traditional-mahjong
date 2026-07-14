@@ -154,6 +154,33 @@ app.get('/api/me', requireAuth, (req, res) => {
   res.json({ ...req.user, isAdmin: req.user.email.toLowerCase() === ADMIN_EMAIL, hubUrl: GAMESNIGHT_HUB_URL });
 });
 
+app.get('/api/profile', requireAuth, (req, res) => {
+  const user = get('SELECT * FROM users WHERE id = ?', [req.user.id]);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  res.json({ user: { id: user.id, name: user.name, email: user.email, notifyEmail: !!user.notify_email } });
+});
+
+app.post('/api/profile/notify', requireAuth, (req, res) => {
+  const { notifyEmail } = req.body ?? {};
+  run('UPDATE users SET notify_email = ? WHERE id = ?', [notifyEmail ? 1 : 0, req.user.id]);
+  res.json({ ok: true });
+});
+
+// Display name is cosmetic, not a login identifier — no verification step
+// needed, updates immediately. Name is part of the shared identity, so
+// replicate it to the hub the same way password changes already are.
+app.post('/api/profile/name', requireAuth, (req, res) => {
+  const name = (req.body?.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Name is required' });
+  if (name.length > 20) return res.status(400).json({ error: 'Name must be 20 characters or fewer' });
+  run('UPDATE users SET name = ? WHERE id = ?', [name, req.user.id]);
+  const user = get('SELECT * FROM users WHERE id = ?', [req.user.id]);
+  const token = signToken(user);
+  setAuthCookie(res, token);
+  pushAccountSyncToHub({ email: user.email, name: user.name });
+  res.json({ ok: true, user: { id: user.id, email: user.email, name: user.name } });
+});
+
 // ── SSO handoff from GamesNight hub ─────────────────────────
 // The hub redirects here with its own JWT (id/email/name, signed with the
 // shared JWT_SECRET). users.id here is an AUTOINCREMENT integer, so unlike
@@ -190,12 +217,17 @@ app.get('/sso', async (req, res) => {
 // Internal-secret-gated, not a user session route.
 app.post('/api/internal/sync-account', requireInternalSecret, (req, res) => {
   const { email, name, passwordHash } = req.body ?? {};
-  if (!email || !name || !passwordHash) return res.status(400).json({ error: 'email, name and passwordHash required' });
+  if (!email || !name) return res.status(400).json({ error: 'email and name required' });
   const normalizedEmail = email.toLowerCase();
   const existing = get('SELECT id FROM users WHERE email = ?', [normalizedEmail]);
   if (existing) {
-    run('UPDATE users SET name = ?, password_hash = ? WHERE email = ?', [name, passwordHash, normalizedEmail]);
+    if (passwordHash) {
+      run('UPDATE users SET name = ?, password_hash = ? WHERE email = ?', [name, passwordHash, normalizedEmail]);
+    } else {
+      run('UPDATE users SET name = ? WHERE email = ?', [name, normalizedEmail]);
+    }
   } else {
+    if (!passwordHash) return res.status(400).json({ error: 'passwordHash required for new user' });
     run('INSERT INTO users (email, name, password_hash) VALUES (?, ?, ?)', [normalizedEmail, name, passwordHash]);
   }
   res.json({ ok: true });
@@ -499,24 +531,93 @@ app.post('/api/games/:roomCode/end', requireAuth, (req, res) => {
   }
 });
 
-async function notifyUser(userId, payload) {
-  if (!pushConfigured) return;
-  const subs = all('SELECT * FROM push_subscriptions WHERE user_id = ?', [userId]);
-  for (const s of subs) {
-    try {
-      await webpush.sendNotification(JSON.parse(s.subscription_json), JSON.stringify(payload));
-    } catch (err) {
-      console.error('Push send failed, removing stale subscription:', err.message);
-      run('DELETE FROM push_subscriptions WHERE id = ?', [s.id]);
-    }
+async function sendEmailNotification(userId, subject, text) {
+  if (!resend) return;
+  const user = get('SELECT * FROM users WHERE id = ?', [userId]);
+  if (!user || !user.notify_email) return;
+  try {
+    await resend.emails.send({
+      from: `Mahjong <noreply@${EMAIL_DOMAIN}>`,
+      to: user.email,
+      subject,
+      text,
+    });
+  } catch (err) { console.error('[email notify] Failed:', err.message); }
+}
+
+// Email is a fallback channel for when push isn't active, not a parallel
+// one. Turn-notification emails are debounced per (userId, roomCode) so a
+// fast-paced game can't flood an inbox; win notifications are one-shot per
+// hand and don't need debouncing.
+const turnEmailLastSent = new Map(); // `${userId}:${roomCode}` -> timestamp
+const TURN_EMAIL_DEBOUNCE_MS = 3 * 60 * 1000;
+
+function shouldSendTurnEmail(userId, roomCode) {
+  const key = `${userId}:${roomCode}`;
+  const last = turnEmailLastSent.get(key);
+  if (last && Date.now() - last < TURN_EMAIL_DEBOUNCE_MS) return false;
+  turnEmailLastSent.set(key, Date.now());
+  return true;
+}
+
+async function notifyUser(userId, payload, { roomCode, excludeUserId, kind } = {}) {
+  if (excludeUserId != null && userId === excludeUserId) return;
+  if (roomCode && isActivelyViewing(userId, roomCode)) return;
+
+  const tasks = [];
+  if (pushConfigured) {
+    tasks.push((async () => {
+      const subs = all('SELECT * FROM push_subscriptions WHERE user_id = ?', [userId]);
+      for (const s of subs) {
+        try {
+          await webpush.sendNotification(JSON.parse(s.subscription_json), JSON.stringify(payload));
+        } catch (err) {
+          console.error('Push send failed, removing stale subscription:', err.message);
+          run('DELETE FROM push_subscriptions WHERE id = ?', [s.id]);
+        }
+      }
+    })());
   }
+
+  const hasActivePush = all('SELECT 1 FROM push_subscriptions WHERE user_id = ?', [userId]).length > 0;
+  if (!hasActivePush && (kind !== 'turn' || shouldSendTurnEmail(userId, roomCode))) {
+    const emailText = `${payload.body}\n\nTurn on push notifications in Notification Settings for instant updates next time — no more waiting on email.`;
+    tasks.push(sendEmailNotification(userId, payload.title, emailText));
+  }
+
+  await Promise.all(tasks);
+}
+
+// Notifies whoever's turn it now is, right after room.turnSeat is written —
+// called from every seat-passing site (human discard/claim and their AI
+// mirrors). excludeUserId keeps a player who just claimed into their own
+// turn from getting pinged about a turn they already know they have.
+function notifyTurnSeat(room, excludeUserId) {
+  const player = room.players.find(p => p.seat === room.turnSeat);
+  if (!player || player.isAI || !player.userId) return;
+  notifyUser(player.userId, {
+    title: 'Your turn in Mahjong!',
+    body: 'The tiles are waiting — make your move.',
+  }, { roomCode: room.code, excludeUserId, kind: 'turn' });
 }
 
 // ---------- WebSocket game server ----------
 
 const wss = new WebSocketServer({ server });
-const clients = new Map(); // ws -> { roomCode, playerId, userId, displayName }
+const clients = new Map(); // ws -> { roomCode, playerId, userId, displayName, visible }
 const rooms = new Map();   // roomCode -> room state (see game.js createRoom)
+
+// A user counts as "actively viewing" a room only if they have a live WS
+// connection scoped to that exact roomCode with a foregrounded tab — being
+// merely connected (e.g. tab backgrounded, or on a different screen) is not
+// enough to suppress push/email. A user can have multiple simultaneous
+// connections (two tabs/devices); any one of them being visible suppresses.
+function isActivelyViewing(userId, roomCode) {
+  for (const meta of clients.values()) {
+    if (meta.userId === userId && meta.roomCode === roomCode && meta.visible) return true;
+  }
+  return false;
+}
 
 function send(ws, msg) {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
@@ -635,7 +736,7 @@ export async function loadRoomsFromDB() {
 }
 
 wss.on('connection', (ws) => {
-  clients.set(ws, { roomCode: null, playerId: null, userId: null, displayName: null });
+  clients.set(ws, { roomCode: null, playerId: null, userId: null, displayName: null, visible: true });
 
   ws.on('message', (raw) => {
     let msg;
@@ -740,6 +841,7 @@ function aiDiscard(room, player) {
   persistRoom(room);
   broadcastRoomState(room);
   broadcast(room, { type: 'tile_discarded', tile, fromSeat: player.seat });
+  notifyTurnSeat(room, null);
   scheduleAiClaims(room);
 }
 
@@ -830,7 +932,7 @@ function executeAiWin(room, player, selfDraw, winningTile, discarderSeat) {
     round: room.round, matchOver: room.round.matchOver,
   });
   for (const p of room.players) {
-    if (p.userId) notifyUser(p.userId, { title: 'Mahjong!', body: `${player.displayName} won!` });
+    if (p.userId) notifyUser(p.userId, { title: 'Mahjong!', body: `${player.displayName} won!` }, { roomCode: room.code });
   }
 }
 
@@ -883,7 +985,7 @@ function handleMessage(ws, msg) {
         aiPlayer.aiSkill = skill;
       }
       rooms.set(roomCode, room);
-      clients.set(ws, { roomCode, playerId, userId: msg.userId, displayName: msg.displayName });
+      clients.set(ws, { roomCode, playerId, userId: msg.userId, displayName: msg.displayName, visible: true });
       persistRoom(room);
       send(ws, { type: 'room_created', roomCode });
       broadcastRoomState(room);
@@ -953,7 +1055,7 @@ function handleMessage(ws, msg) {
       if (room.phase !== 'waiting') return send(ws, { type: 'error', message: 'Game already in progress' });
       const playerId = msg.playerId ?? randomUUID();
       const seat = G.addPlayer(room, { playerId, userId: msg.userId, displayName: msg.displayName ?? 'Player' });
-      clients.set(ws, { roomCode: room.code, playerId, userId: msg.userId, displayName: msg.displayName });
+      clients.set(ws, { roomCode: room.code, playerId, userId: msg.userId, displayName: msg.displayName, visible: true });
       persistRoom(room);
       send(ws, { type: 'room_joined', roomCode: room.code, seat, phase: room.phase });
       broadcastRoomState(room);
@@ -981,6 +1083,7 @@ function handleMessage(ws, msg) {
       persistRoom(room);
       broadcastRoomState(room);
       broadcast(room, { type: 'tile_discarded', tile: msg.tile, fromSeat: player.seat });
+      notifyTurnSeat(room, meta.userId);
       scheduleAiClaims(room);
       break;
     }
@@ -1004,6 +1107,7 @@ function handleMessage(ws, msg) {
       broadcastRoomState(room);
       broadcast(room, { type: 'tile_discarded', tile: msg.tile, fromSeat: player.seat });
       broadcast(room, { type: 'player_fishing', playerId: player.playerId, seat: player.seat });
+      notifyTurnSeat(room, meta.userId);
       scheduleAiClaims(room);
       break;
     }
@@ -1145,7 +1249,7 @@ function handleMessage(ws, msg) {
         round: room.round, matchOver: room.round.matchOver,
       });
       for (const p of room.players) {
-        if (p.userId) notifyUser(p.userId, { title: 'Mahjong!', body: `${player.displayName} won the game.` });
+        if (p.userId) notifyUser(p.userId, { title: 'Mahjong!', body: `${player.displayName} won the game.` }, { roomCode: room.code });
       }
       break;
     }
@@ -1201,12 +1305,18 @@ function handleMessage(ws, msg) {
         playerId: player.playerId,
         userId: msg.userId ?? player.userId,
         displayName: player.displayName,
+        visible: true,
       });
       send(ws, { type: 'room_joined', roomCode: room.code, seat: player.seat });
       broadcastRoomState(room);
       // Resume AI scheduling if the game is mid-play
       if (room.phase === 'playing') scheduleAiTurn(room);
       persistRoom(room);
+      break;
+    }
+    case 'visibility': {
+      if (!meta) return;
+      clients.set(ws, { ...meta, visible: !!msg.visible });
       break;
     }
     default:
@@ -1266,4 +1376,4 @@ if (process.env.NODE_ENV !== 'test') {
   startServer();
 }
 
-export { app, server, rooms, clients, persistRoom };
+export { app, server, rooms, clients, persistRoom, isActivelyViewing, notifyUser, shouldSendTurnEmail, turnEmailLastSent };
